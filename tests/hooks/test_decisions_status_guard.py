@@ -90,22 +90,27 @@ def _bash(command: str) -> dict[str, object]:
     return {"tool_name": "Bash", "tool_input": {"command": command}}
 
 
-def _patch_header(cwd: Path, header: str, body: str) -> dict[str, object]:
-    """An apply_patch payload whose Update File header is given verbatim."""
+def _patch_header(
+    cwd: Path, header: str, body: str, more: str = ""
+) -> dict[str, object]:
+    """An apply_patch payload whose Update File header is given verbatim.
+
+    *more* is appended as further file sections before the end marker.
+    """
     return {
         "cwd": str(cwd),
         "tool_name": "apply_patch",
         "tool_input": {
             "command": "*** Begin Patch\n"
             f"*** Update File: {header}\n"
-            f"{body}"
+            f"{body}{more}"
             "*** End Patch"
         },
     }
 
 
-def _patch(root: Path, body: str) -> dict[str, object]:
-    return _patch_header(root, "docs/decisions.md", body)
+def _patch(root: Path, body: str, more: str = "") -> dict[str, object]:
+    return _patch_header(root, "docs/decisions.md", body, more)
 
 
 _FLIP_HUNK = (
@@ -339,6 +344,89 @@ def test_unparseable_codex_decisions_patch_is_denied(tmp_path: Path) -> None:
     _decisions_file(tmp_path)
     payload = _patch(tmp_path, "not a valid hunk\n")
     assert _denied(payload)
+
+
+
+# --- Codex apply_patch: simulated as Codex applies it ----------------------
+# Each semantic below was measured against Codex's own apply_patch: a first
+# hunk may omit its `@@` line, `@@ <line>` seeks forward to that line, hunks
+# only ever move forward, and a hunk without old lines appends at the end.
+
+_THREE = (
+    "## ADR-0001 — one\n\n**Status:** Proposed\n\n"
+    "## ADR-0002 — two\n\n**Status:** Proposed\n\n"
+    "## ADR-0003 — three\n\n**Status:** Accepted\n"
+)
+
+
+def test_codex_flip_with_a_decoy_log_added_is_denied(tmp_path: Path) -> None:
+    # The Add section creates a different file; it must not stand in for the
+    # simulated result of the real log.
+    _decisions_file(tmp_path)
+    decoy = "".join(f"+{line}\n" for line in _DOC.splitlines())
+    more = f"*** Add File: scratch/docs/decisions.md\n{decoy}"
+    assert _denied(_patch(tmp_path, _FLIP_HUNK, more))
+
+
+def test_codex_prose_edits_to_two_logs_are_allowed(tmp_path: Path) -> None:
+    # Each log is simulated against its own text, not the first one's.
+    _decisions_file(tmp_path)
+    other = tmp_path / "wt" / "docs" / "decisions.md"
+    other.parent.mkdir(parents=True)
+    other.write_text("## ADR-0001 — x\n\n**Status:** Accepted\nprose\n")
+    more = "*** Update File: wt/docs/decisions.md\n@@\n-prose\n+amended\n"
+    assert not _denied(_patch(tmp_path, _PROSE_HUNK, more))
+
+
+def test_codex_first_hunk_without_an_at_line_is_vetted(tmp_path: Path) -> None:
+    _decisions_file(tmp_path)
+    body = _FLIP_HUNK.removeprefix("@@\n") + _PROSE_HUNK
+    assert _denied(_patch(tmp_path, body))
+
+
+def test_codex_anchored_hunks_are_vetted_where_they_land(
+    tmp_path: Path,
+) -> None:
+    # Applied first-match-anywhere, both hunks hit ADR-0001 and cancel out;
+    # Codex ratifies ADR-0002 and de-ratifies ADR-0003.
+    _decisions_file(tmp_path, _THREE)
+    body = (
+        "@@ ## ADR-0002 — two\n"
+        " \n"
+        "-**Status:** Proposed\n"
+        "+**Status:** Accepted\n"
+        "@@ ## ADR-0003 — three\n"
+        " \n"
+        "-**Status:** Accepted\n"
+        "+**Status:** Proposed\n"
+    )
+    assert _denied(_patch(tmp_path, body))
+
+
+def test_codex_hunks_out_of_file_order_are_denied(tmp_path: Path) -> None:
+    # Codex fails such a patch; the guard cannot vet what will not apply.
+    _decisions_file(tmp_path)
+    body = (
+        "@@\n-**Decision:** settled one.\n+**Decision:** amended.\n"
+        "@@\n-**Decision:** draft one.\n+**Decision:** amended.\n"
+    )
+    assert _denied(_patch(tmp_path, body))
+
+
+def test_codex_appended_draft_is_allowed(tmp_path: Path) -> None:
+    _decisions_file(tmp_path)
+    body = "@@\n+\n+## ADR-0003 — new\n+\n+**Status:** Proposed\n"
+    assert not _denied(_patch(tmp_path, body))
+
+
+def test_codex_appended_accepted_entry_is_denied(tmp_path: Path) -> None:
+    _decisions_file(tmp_path)
+    body = (
+        "@@ ## ADR-0001 — a draft\n"
+        "+## ADR-0003 — new\n"
+        "+**Status:** Accepted\n"
+    )
+    assert _denied(_patch(tmp_path, body))
 
 
 # --- Bash: write-shaped commands are denied, reads pass ---------------------

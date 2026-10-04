@@ -75,10 +75,14 @@ the wire-format plumbing is shared across hooks via hook_lib.py.
 import os
 import re
 import sys
+from collections.abc import Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from hook_lib import (
+    PATCH_FILE,
+    PATCH_MOVE,
     absolute_path,
     changed_paths,
     command_text,
@@ -140,15 +144,7 @@ _BASH_WRITE_TOKENS = re.compile(
     r"|\b(?:sh|bash|zsh|dash|ksh|ash)\b" + _OPTS + r"\s+-[A-Za-z]*c\b)"
 )
 
-# Trailing whitespace/CR is excluded from the capture — see hook_lib's
-# copy of these patterns for what a CRLF patch header did without it.
-
 GUARDED = "docs/decisions.md"
-_PATCH_SECTION = re.compile(
-    r"^\*\*\* (Add|Delete|Update) File: (.+?)[ \t\r]*$", re.MULTILINE
-)
-_PATCH_MOVE = re.compile(r"^\*\*\* Move to: (.+?)[ \t\r]*$", re.MULTILINE)
-
 
 def _marker_counts(block: str) -> tuple[int, int]:
     """(proposed, accepted) markers in *block*, however cased or spaced."""
@@ -256,133 +252,158 @@ def _checkout_has_log(payload: dict[str, Any]) -> bool:
     return (cwd / GUARDED).is_file()
 
 
-def _is_guarded_header(payload: dict[str, Any], raw: str) -> bool:
-    """Whether an apply_patch header names the guarded file.
+def _sections(command: str) -> Iterator[tuple[str, str, str]]:
+    """(action, header, body) for each file section of an apply_patch.
 
-    The header is relative to the client's cwd, so it is absolutised first —
-    the same resolution ``changed_paths`` applies. Both spellings are then
-    accepted, because a session rooted at the repo top writes
-    ``docs/decisions.md`` and one rooted in ``docs/`` writes ``decisions.md``.
+    A body runs to the next section header or the end-of-patch marker.
     """
-    return _is_guarded(str(absolute_path(payload, raw)))
+    matches = list(PATCH_FILE.finditer(command))
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(command)
+        body = command[m.end() : end].split("*** End Patch", 1)[0]
+        yield m.group(1), m.group(2), body.removeprefix("\n")
 
 
-def _patch_lines(lines: list[str]) -> tuple[str, str] | None:
-    """Translate one apply_patch hunk to its old/new text fragments."""
-    old: list[str] = []
-    new: list[str] = []
+@dataclass
+class _Hunk:
+    anchor: str | None = None
+    old: list[str] = field(default_factory=list)
+    new: list[str] = field(default_factory=list)
+    at_eof: bool = False
+
+
+def _hunks(body: str) -> list[_Hunk] | None:
+    """Parse an Update section's body; None when a line fits no hunk.
+
+    As Codex reads it: the first hunk may omit its ``@@`` line, and ``@@
+    <line>`` names a line to seek to before matching. A blank line is
+    unchanged context — apply_patch writes it as the empty string rather
+    than as a lone space, and reading it as a parse failure denied every
+    prose edit whose context crossed a paragraph break.
+    """
+    hunks: list[_Hunk] = []
+    lines = body.split("\n")
+    if lines[-1] == "":
+        lines.pop()  # the body's own final newline
     for line in lines:
+        if line.startswith("*** Move to:"):
+            continue
+        if line.startswith("@@"):
+            hunks.append(_Hunk(line[3:] or None))
+            continue
+        if not hunks:
+            hunks.append(_Hunk())
+        hunk = hunks[-1]
         if line == "*** End of File":
+            hunk.at_eof = True
             continue
-        if not line:
-            # A blank CONTEXT line. apply_patch writes it as the empty
-            # string rather than as a lone space, so it is unchanged text on
-            # both sides, not a parse failure — reading it as one denied
-            # every prose edit whose context crossed a paragraph break.
-            old.append("\n")
-            new.append("\n")
-            continue
-        if line[0] not in " +-":
+        if line and line[0] not in " +-":
             return None
-        prefix = line[0]
-        content = f"{line[1:]}\n"
+        prefix, text = (line[0], line[1:]) if line else (" ", "")
         if prefix in " -":
-            old.append(content)
+            hunk.old.append(text)
         if prefix in " +":
-            new.append(content)
-    return "".join(old), "".join(new)
+            hunk.new.append(text)
+    return hunks
+
+
+def _seek(lines: list[str], pattern: list[str], start: int) -> int | None:
+    """First index from *start* where *pattern* occurs as whole lines."""
+    n = len(pattern)
+    ends = range(start, len(lines) - n + 1)
+    return next((i for i in ends if lines[i : i + n] == pattern), None)
 
 
 def _apply_update(before: str, body: str) -> str | None:
-    """Simulate the update hunks relevant to the guarded file."""
-    after = before
-    chunks = re.split(r"^@@.*$", body, flags=re.MULTILINE)[1:]
-    if not chunks:
+    """Simulate one Update section the way Codex applies it.
+
+    Each semantic here was measured against Codex's own apply_patch.
+    Hunks move strictly forward: an anchor, and then the old lines, are
+    sought from where the previous hunk ended — replacing the first match
+    anywhere let two anchored hunks vet one entry while changing two
+    others. A hunk without old lines appends at the end of the file,
+    anchor or not. Matching is exact: Codex's whitespace-tolerant fallback
+    is not modelled, so such a hunk is denied rather than vetted against
+    text it does not touch.
+    """
+    hunks = _hunks(body)
+    if not hunks:
         return None
-    for chunk in chunks:
-        # Only the split's own artefacts are dropped: the empty first
-        # element left by the `@@` line, and the empty last one left by a
-        # trailing newline. Every other empty line is a blank context line
-        # and must survive — `_patch_lines` reads it as context.
-        raw_lines = chunk.split("\n")[1:]
-        if raw_lines and not raw_lines[-1]:
-            raw_lines = raw_lines[:-1]
-        move = "*** Move to:"
-        lines = [line for line in raw_lines if not line.startswith(move)]
-        fragments = _patch_lines(lines)
-        if fragments is None:
+    lines = before.split("\n")
+    if lines[-1] == "":
+        lines.pop()
+    cursor = 0
+    for hunk in hunks:
+        if hunk.anchor is not None:
+            at = _seek(lines, [hunk.anchor], cursor)
+            if at is None:
+                return None
+            cursor = at + 1
+        old, new = hunk.old, hunk.new
+        if not old:
+            lines += new
+            continue
+        start = max(cursor, len(lines) - len(old)) if hunk.at_eof else cursor
+        at = _seek(lines, old, start)
+        if at is None and len(old) > 1 and old[-1] == "":
+            # Codex retries without a trailing blank context line.
+            old, new = old[:-1], new[:-1] if new[-1:] == [""] else new
+            at = _seek(lines, old, start)
+        if at is None:
             return None
-        old, new = fragments
-        if old not in after:
-            # apply_patch accepts a final file line without a newline. Mirror
-            # that case without weakening an otherwise exact-context match.
-            old = old.removesuffix("\n")
-            new = new.removesuffix("\n")
-        if not old or old not in after:
-            return None
-        after = after.replace(old, new, 1)
-    return after
+        lines[at : at + len(old)] = new
+        cursor = at + len(new)
+    return "\n".join(lines) + "\n"
 
 
 def _codex_after(
-    payload: dict[str, Any],
-    command: str,
-    before: str,
+    payload: dict[str, Any], command: str, path: Path, before: str
 ) -> str | None:
-    """Return the simulated docs/decisions.md after a Codex patch.
+    """The simulated text of the log at *path* after a Codex patch.
 
-    Headers are resolved against the payload's cwd before the guarded-path
-    test, exactly as ``changed_paths`` resolves them. Testing the raw header
-    here instead made the two disagree for a session rooted anywhere but the
-    repo top: a bare ``decisions.md`` header from ``docs/`` was picked up as
-    the guarded file by one and skipped by the other, so ``found`` stayed
-    False and every edit from such a session — prose included — was denied.
+    Only sections whose header resolves to *path* apply. Folding every
+    log-shaped section into one buffer let an Add of a decoy log elsewhere
+    overwrite the simulated result of the real one, and simulated a second
+    log against the first one's text. Headers resolve against the payload's
+    cwd, as ``changed_paths`` resolves them.
     """
-    matches = list(_PATCH_SECTION.finditer(command))
+    target = os.path.realpath(path)
     after = before
-    found = False
-    for index, match in enumerate(matches):
-        if not _is_guarded_header(payload, match.group(2)):
+    for action, header, body in _sections(command):
+        if os.path.realpath(absolute_path(payload, header)) != target:
             continue
-        found = True
-        if index + 1 < len(matches):
-            end = matches[index + 1].start()
-        else:
-            end = len(command)
-        body = command[match.end() : end]
-        body = body.split("*** End Patch", 1)[0].lstrip("\n")
-        action = match.group(1)
         if action == "Delete":
             after = ""
-            continue
-        if action == "Add":
+        elif action == "Add":
             lines = body.splitlines()
             if any(not line.startswith("+") for line in lines):
                 return None
             after = "".join(f"{line[1:]}\n" for line in lines)
-            continue
-        updated = _apply_update(after, body)
-        if updated is None:
+        elif (updated := _apply_update(after, body)) is None:
             return None
-        after = updated
-    return after if found else None
+        else:
+            after = updated
+    return after
 
 
 def _moves_guarded_file(payload: dict[str, Any], command: str) -> bool:
     """Whether a patch section moves docs/decisions.md from or to a path."""
-    matches = list(_PATCH_SECTION.finditer(command))
-    for index, match in enumerate(matches):
-        if index + 1 < len(matches):
-            end = matches[index + 1].start()
-        else:
-            end = len(command)
-        move = _PATCH_MOVE.search(command, match.end(), end)
-        if move and (
-            _is_guarded_header(payload, match.group(2))
-            or _is_guarded_header(payload, move.group(1))
+    for _, header, body in _sections(command):
+        move = PATCH_MOVE.search(body)
+        if move and any(
+            _is_guarded(str(absolute_path(payload, raw)))
+            for raw in (header, move.group(1))
         ):
             return True
     return False
+
+
+def _read(path: Path) -> str:
+    """The log's current text; empty when it cannot be read."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def _existing_logs(payload: dict[str, Any]) -> list[Path]:
@@ -422,31 +443,27 @@ def main() -> None:
         sys.exit(0)
 
     if tool == "apply_patch":
-        paths = _existing_logs(data)
-        if not paths:
-            sys.exit(0)
         command = command_text(ti)
-        if _moves_guarded_file(data, command):
+        logs = _existing_logs(data)
+        if logs and _moves_guarded_file(data, command):
             deny(
                 "Refused: this patch moves docs/decisions.md. Moving the "
                 "guarded file implicitly removes or replaces all of its ADR "
                 "status markers, which is an author-only decision. Make the "
                 "non-status edits without moving the file."
             )
-        path = paths[0]
-        try:
-            before = path.read_text(encoding="utf-8")
-        except OSError:
-            before = ""
-        after = _codex_after(data, command, before)
-        if after is None:
-            deny(
-                "Refused: this patch targets docs/decisions.md but the ADR "
-                "status guard cannot safely simulate its patch structure. "
-                "Use a standard apply_patch Add/Delete/Update section so the "
-                "status-marker transitions can be vetted."
-            )
-        _vet(before, after)
+        for path in logs:
+            before = _read(path)
+            after = _codex_after(data, command, path, before)
+            if after is None:
+                deny(
+                    "Refused: this patch targets docs/decisions.md but the "
+                    "ADR status guard cannot safely simulate its patch "
+                    "structure. Use a standard apply_patch Add/Delete/Update "
+                    "section whose context lines match the file exactly, so "
+                    "the status-marker transitions can be vetted."
+                )
+            _vet(before, after)
         sys.exit(0)
 
     if tool not in ("Edit", "Write"):
@@ -458,12 +475,7 @@ def main() -> None:
     edited = _existing_logs(data)
     if not edited:
         sys.exit(0)
-    target = edited[0]
-
-    try:
-        before = target.read_text(encoding="utf-8")
-    except OSError:
-        before = ""
+    before = _read(edited[0])
 
     if tool == "Write":
         after = str(ti.get("content", "") or "")
