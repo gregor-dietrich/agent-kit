@@ -37,10 +37,10 @@ _HEREDOC_START = re.compile(r"(?<!<)<<(?!<)-?\s*([\"']?[A-Za-z_][\w-]*[\"']?)")
 # decisions guard exists to protect. `is_guarded_suffix` strips as well: the
 # raw header string is tested there too, so neither site may be the exposed
 # one.
-_PATCH_FILE = re.compile(
-    r"^\*\*\* (?:Add|Delete|Update) File: (.+?)[ \t\r]*$", re.MULTILINE
+PATCH_FILE = re.compile(
+    r"^\*\*\* (Add|Delete|Update) File: (.+?)[ \t\r]*$", re.MULTILINE
 )
-_PATCH_MOVE = re.compile(r"^\*\*\* Move to: (.+?)[ \t\r]*$", re.MULTILINE)
+PATCH_MOVE = re.compile(r"^\*\*\* Move to: (.+?)[ \t\r]*$", re.MULTILINE)
 
 # Shells whose `-c` argument IS the command text, and the combined
 # short-option spelling of that flag (`-lc`, `-ic`, `-euc`, …).
@@ -320,7 +320,8 @@ def changed_paths(payload: dict[str, Any]) -> list[Path]:
     command = command_text(ti)
     if not command:
         return []
-    raw_paths = _PATCH_FILE.findall(command) + _PATCH_MOVE.findall(command)
+    raw_paths = [m.group(2) for m in PATCH_FILE.finditer(command)]
+    raw_paths += PATCH_MOVE.findall(command)
     result: list[Path] = []
     seen: set[Path] = set()
     for raw in raw_paths:
