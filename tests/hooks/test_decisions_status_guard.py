@@ -799,6 +799,17 @@ def test_an_unclosed_comment_hides_what_follows(tmp_path: Path) -> None:
     assert _denied(_edit(doc, "**Status:** Proposed", new))
 
 
+@pytest.mark.parametrize("value", ["Proposed", "Accepted"])
+def test_a_lone_comment_opener_hiding_a_marker_is_denied(
+    tmp_path: Path, value: str
+) -> None:
+    # On a line of its own an unclosed `<!--` opens an HTML block that runs
+    # to the end of the page: every marker after it vanishes for a reader
+    # while the source, and so the raw view, still holds it.
+    doc = _decisions_file(tmp_path)
+    line = f"**Date:** d · **Status:** {value}"
+    assert _denied(_edit(doc, line, f"<!--\n{line}"))
+
 
 def test_a_bare_angle_bracket_does_not_hide_a_marker(tmp_path: Path) -> None:
     # `3 < 5` is text, not a tag: stripping `<…>` across it erased the

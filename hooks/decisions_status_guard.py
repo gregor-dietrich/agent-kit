@@ -133,10 +133,14 @@ _VALUE_MARKUP = str.maketrans("", "", "*_`")
 # What a reader never sees: a closed HTML comment and the tags themselves.
 # A comment kept a Proposed marker in the source while the page showed only
 # the Accepted written next to it. Only tag-shaped `<…>` is stripped: `3 < 5`
-# is text. This view is an approximation of rendering, so `_vet` judges the
-# raw text as well and denies when either view shows a blocked move.
+# is text. An unclosed `<!--` hides the rest of the page only where it opens
+# a line, as an HTML block does; mid-line, as in a code span, it is text.
+# This view is an approximation of rendering, so `_vet` judges the raw text
+# as well and denies when either view shows a blocked move.
 _UNRENDERED = re.compile(
-    r"<!--.*?-->|</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>", re.DOTALL
+    r"<!--.*?-->|^ {0,3}<!--(?!.*?-->).*"
+    r"|</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>",
+    re.DOTALL | re.MULTILINE,
 )
 
 _HEADING = re.compile(r"^## (ADR-\d+)", re.MULTILINE)
