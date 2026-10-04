@@ -1012,6 +1012,10 @@ _SED = "sed -i s/a/b/ docs/decisions.md"
         f"$(cat <<'EOF'\n{_SED}\nEOF\n)",
         f"sudo $(cat <<'EOF'\n{_SED}\nEOF\n)",
         f"M=\"$(cat <<'EOF'\n{_SED}\nEOF\n)\"; $M",
+        f"M=\"$(cat <<'EOF'\n{_SED}\nEOF\n)\"; if true; then $M; fi",
+        # Commands that run their argument: only git's message is prose.
+        f"watch \"$(cat <<'EOF'\n{_SED}\nEOF\n)\"",
+        f"su -c \"$(cat <<'EOF'\n{_SED}\nEOF\n)\"",
     ],
 )
 def test_heredoc_bodies_a_shell_may_run_are_scanned(command: str) -> None:

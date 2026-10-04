@@ -44,10 +44,11 @@ reads (grep/cat/git log, redirects to /dev/null) pass. A heredoc body is
 left out of the scan only when the shell would read it as one and nothing
 can run it: every ``<<`` in the command is a real operator with its
 terminator line, each is read by ``git commit``/``git tag`` with ``-F -``
-or ``--file=-``, or by a bare ``cat`` in a quoted ``"$(…)"``, and nothing
-executes text (eval, an interpreter, a command word that is an
-expansion). So a commit message is not read as a command, and everything
-else is scanned whole. An argv-list
+or ``--file=-``, or by a bare ``cat`` in a quoted ``"$(…)"`` passed to
+``git commit``/``git tag``, and nothing could re-read a message to run it
+(eval, an interpreter, a command word that is an expansion). So a commit
+message is not read as a command, and everything else is scanned whole.
+An argv-list
 ``command`` is scanned like a string one, and a ``bash -lc <script>``
 wrapper is unwrapped to the script it runs.
 
@@ -195,9 +196,10 @@ _BENIGN_REDIRECT = re.compile(
     r"(?:(?:\d*|&)>>?\s*/dev/null|\d*>&(?:\d+|-))(?=[\s;&|)]|$)"
 )
 
-# What can run the text a `"$(cat <<EOF …)"` captures: words that execute
-# their argument, and a command word that is an expansion (`$(…)`, or `$M`
-# after `M="$(…)"`). With one present, the body may be the command.
+# What can run a dropped body once git holds it: `eval "$(git log -1
+# --format=%B)"` re-reads the message as a command. Words that execute
+# text, and a command word that is an expansion; with one present, the
+# whole command is scanned.
 _RUNS_TEXT = re.compile(
     r"\b(?:eval|source|xargs|at|batch)\b|(?:^|[;&|(])\s*(?:\.\s|\"?\$)|"
     + _INTERPRETERS,
@@ -338,8 +340,8 @@ def _command_may_reach_log(payload: dict[str, Any], command: str) -> bool:
 class _Heredoc:
     strip_tabs: bool
     delim: str
-    in_quoted_subst: bool  # read inside a double-quoted `"$(…)"`
     reader: str = ""  # the simple command the operator belongs to
+    consumer: str | None = None  # the one a `"$(…)"` around it feeds
     body: tuple[int, int] = (0, 0)  # through the terminator line
 
 
@@ -347,8 +349,9 @@ class _Heredoc:
 class _Context:
     quoted: bool  # inside "…"; otherwise the top level, `(…)` or `$(…)`
     start: int  # where the current simple command begins
-    in_quoted_subst: bool = False
+    outer: "_Context | None" = None  # whose argument a `"$(…)"` is
     docs: list[_Heredoc] = field(default_factory=list)
+    fed: list[_Heredoc] = field(default_factory=list)  # docs in that "$(…)"
 
 
 def _heredocs(command: str) -> list[_Heredoc] | None:
@@ -363,9 +366,12 @@ def _heredocs(command: str) -> list[_Heredoc] | None:
     stack = [_Context(False, 0)]
 
     def end_command(ctx: _Context, at: int) -> None:
+        text = command[ctx.start : at]
         for doc in ctx.docs:
-            doc.reader = command[ctx.start : at]
-        ctx.docs, ctx.start = [], at + 1
+            doc.reader = text
+        for doc in ctx.fed:
+            doc.consumer = text
+        ctx.docs, ctx.fed, ctx.start = [], [], at + 1
 
     i, n = 0, len(command)
     while i < n:
@@ -376,7 +382,8 @@ def _heredocs(command: str) -> list[_Heredoc] | None:
             i += 2
             continue
         if command.startswith("$(", i):
-            stack.append(_Context(False, i + 2, ctx.quoted))
+            outer = stack[-2] if ctx.quoted else None
+            stack.append(_Context(False, i + 2, outer))
             i += 2
             continue
         if ctx.quoted:
@@ -406,9 +413,11 @@ def _heredocs(command: str) -> list[_Heredoc] | None:
         elif command.startswith("<<", i):
             if not (m := _HEREDOC_OP.match(command, i)):
                 return None
-            doc = _Heredoc(m[1] == "-", m[3], ctx.in_quoted_subst)
+            doc = _Heredoc(m[1] == "-", m[3])
             docs.append(doc)
             ctx.docs.append(doc)
+            if ctx.outer:
+                ctx.outer.fed.append(doc)
             pending.append(doc)
             i = m.end()
             continue
@@ -437,15 +446,27 @@ def _heredocs(command: str) -> list[_Heredoc] | None:
     return docs
 
 
-def _reads_prose(doc: _Heredoc) -> bool:
-    """Whether *doc*'s reader takes its body as text it never runs."""
+_GIT_MESSAGE = (["git", "commit"], ["git", "tag"])
+
+
+def _words(text: str) -> list[str]:
+    """*text*'s shell words, heredoc operators dropped; [] if unbalanced."""
     try:
-        words = shlex.split(_HEREDOC_OP.sub(" ", doc.reader))
+        return shlex.split(_HEREDOC_OP.sub(" ", text))
     except ValueError:
-        return False
-    if words[:2] in (["git", "commit"], ["git", "tag"]):
+        return []
+
+
+def _reads_prose(doc: _Heredoc) -> bool:
+    """Whether *doc*'s body only ever becomes a git commit or tag message.
+
+    Judged on who consumes it, never on what might run it: a list of
+    commands that execute text (`watch`, `su -c`, …) is never complete.
+    """
+    words = _words(doc.reader)
+    if words[:2] in _GIT_MESSAGE:
         return "--file=-" in words or ("-F", "-") in zip(words, words[1:])
-    return words == ["cat"] and doc.in_quoted_subst
+    return words == ["cat"] and _words(doc.consumer or "")[:2] in _GIT_MESSAGE
 
 
 def _write_scan_text(command: str) -> str:
