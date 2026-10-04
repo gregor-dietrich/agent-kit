@@ -41,8 +41,13 @@ decisions.md AND carries a write-shaped token (in-place editors, redirects,
 tee/mv/cp/apply_patch, git checkout/restore, inline interpreters and ones
 reading a script from stdin) is denied with a pointer to Edit/Write; plain
 reads (grep/cat/git log, redirects to /dev/null) pass. A heredoc body is
-prose unless something in the command executes text (eval, source, an
-interpreter), so a commit message is not read as a command. An argv-list
+left out of the scan only when the shell would read it as one and nothing
+can run it: every ``<<`` in the command is a real operator with its
+terminator line, each is read by ``git commit``/``git tag`` with ``-F -``
+or ``--file=-``, or by a bare ``cat`` in a quoted ``"$(…)"``, and nothing
+executes text (eval, an interpreter, a command word that is an
+expansion). So a commit message is not read as a command, and everything
+else is scanned whole. An argv-list
 ``command`` is scanned like a string one, and a ``bash -lc <script>``
 wrapper is unwrapped to the script it runs.
 
@@ -84,6 +89,7 @@ the wire-format plumbing is shared across hooks via hook_lib.py.
 import html
 import os
 import re
+import shlex
 import sys
 import unicodedata
 from collections.abc import Iterator
@@ -101,7 +107,6 @@ from hook_lib import (
     is_guarded_suffix,
     payload_cwd,
     read_payload,
-    strip_heredocs,
     tokenize_lines,
     tool_input,
 )
@@ -155,12 +160,14 @@ _EMAIL_SPAN = re.compile(r"<[^<>\s]+@[^<>\s]+>")
 # not match. `apply_patch` is a first-class writer and belongs here for
 # the same reason `tee`/`mv` do — Codex spells it as argv[0] of a shell
 # call.
-# An interpreter also runs a script it reads from stdin: one passed as `-`,
-# a heredoc or here-string, or a pipe into an interpreter given no script
-# argument (`python3 x.py < log` reads the log as data and is not matched).
+# An interpreter also runs a script it reads from stdin: one passed as `-`
+# or /dev/stdin, a heredoc or here-string, or a pipe into an interpreter
+# given no script argument (`python3 x.py < log` reads the log as data and
+# is not matched). awk and sed count: `print > f` and sed's `w f` write.
 _OPTS = r"(?:\s+-[A-Za-z]+)*"
 _INTERPRETERS = (
-    r"\b(?:python3?(?:\.\d+)?|node|ruby|perl|sh|bash|zsh|dash|ksh|ash)\b"
+    r"\b(?:python3?(?:\.\d+)?|node|ruby|perl|sh|bash|zsh|dash|ksh|ash"
+    r"|[gmn]?awk|sed)\b"
 )
 _BASH_WRITE_TOKENS = re.compile(
     r"(?:\bsed\b[^|;&]*\s(?:-[A-Za-z]*i|--in-place)"
@@ -173,21 +180,28 @@ _BASH_WRITE_TOKENS = re.compile(
     r"|\bpython3?(?:\.\d+)?\b[^|;&]*\s-[A-Za-z]*c\b"
     r"|\b(?:node|ruby|perl)\b[^|;&]*\s-[A-Za-z]*e\b"
     r"|\b(?:sh|bash|zsh|dash|ksh|ash)\b" + _OPTS + r"\s+-[A-Za-z]*c\b"
-    r"|" + _INTERPRETERS + r"[^|;&]*(?:\s-(?=\s|$)|<<)"
+    r"|" + _INTERPRETERS + r"[^|;&]*(?:\s(?:-|/dev/stdin)(?=\s|$)|<<)"
     r"|\|\s*" + _INTERPRETERS + _OPTS + r"[ \t]*(?:$|[\n|;&)]))"
 )
 
 # Redirects that cannot write the log: to /dev/null, or duplicating a file
-# descriptor. Counting them as writes denied `grep … 2>/dev/null`.
-_BENIGN_REDIRECT = re.compile(r"(?:\d*|&)>>?\s*/dev/null\b|\d*>&(?:\d+|-)")
+# descriptor. Counting them as writes denied `grep … 2>/dev/null`. Only as
+# a whole shell word: `>&1/x` opens a file, and /dev/null.md is not null.
+_BENIGN_REDIRECT = re.compile(
+    r"(?:(?:\d*|&)>>?\s*/dev/null|\d*>&(?:\d+|-))(?=[\s;&|)]|$)"
+)
 
-# Words that execute text handed to them. Without one, a heredoc body is
-# prose — a commit message saying `Proposed -> reviewed` read as a redirect
-# — and is left out of the scan; with one, the body may be the command.
+# What can run the text a `"$(cat <<EOF …)"` captures: words that execute
+# their argument, and a command word that is an expansion (`$(…)`, or `$M`
+# after `M="$(…)"`). With one present, the body may be the command.
 _RUNS_TEXT = re.compile(
-    r"\b(?:eval|source|xargs|at|batch)\b|(?:^|[;&|(]\s*)\.\s|" + _INTERPRETERS,
+    r"\b(?:eval|source|xargs|at|batch)\b|(?:^|[;&|(])\s*(?:\.\s|\"?\$)|"
+    + _INTERPRETERS,
     re.MULTILINE,
 )
+
+# A heredoc operator and its delimiter: a name, optionally quoted.
+_HEREDOC_OP = re.compile(r"<<(-?)[ \t]*(['\"]?)([A-Za-z_][\w-]*)\2")
 
 GUARDED = "docs/decisions.md"
 
@@ -306,7 +320,7 @@ def _command_may_reach_log(payload: dict[str, Any], command: str) -> bool:
     if _checkout_has_log(payload) or _RELOCATES.search(command):
         return True
     words = set(_LOG_WORD.findall(command))
-    for tokens in tokenize_lines(command):
+    for tokens in tokenize_lines(command, heredocs=True):
         words.update(w for tok in tokens for w in _LOG_IN_WORD.findall(tok))
     for word in words:
         expanded = os.path.expandvars(os.path.expanduser(word))
@@ -316,10 +330,132 @@ def _command_may_reach_log(payload: dict[str, Any], command: str) -> bool:
     return False
 
 
+@dataclass
+class _Heredoc:
+    strip_tabs: bool
+    delim: str
+    in_quoted_subst: bool  # read inside a double-quoted `"$(…)"`
+    reader: str = ""  # the simple command the operator belongs to
+    body: tuple[int, int] = (0, 0)  # through the terminator line
+
+
+@dataclass
+class _Context:
+    quoted: bool  # inside "…"; otherwise the top level, `(…)` or `$(…)`
+    start: int  # where the current simple command begins
+    in_quoted_subst: bool = False
+    docs: list[_Heredoc] = field(default_factory=list)
+
+
+def _heredocs(command: str) -> list[_Heredoc] | None:
+    """The heredocs *command* opens, as bash reads it; None when unsure.
+
+    A ``<<`` inside quotes or a comment opens none. Unsure is a backquote,
+    an unbalanced quote or paren, a delimiter that is not a plain name, or
+    a missing terminator line — the caller then scans the whole command.
+    """
+    docs: list[_Heredoc] = []
+    pending: list[_Heredoc] = []
+    stack = [_Context(False, 0)]
+
+    def end_command(ctx: _Context, at: int) -> None:
+        for doc in ctx.docs:
+            doc.reader = command[ctx.start : at]
+        ctx.docs, ctx.start = [], at + 1
+
+    i, n = 0, len(command)
+    while i < n:
+        c, ctx = command[i], stack[-1]
+        if c == "`":
+            return None
+        if c == "\\":
+            i += 2
+            continue
+        if command.startswith("$(", i):
+            stack.append(_Context(False, i + 2, ctx.quoted))
+            i += 2
+            continue
+        if ctx.quoted:
+            if c == '"':
+                stack.pop()
+            i += 1
+            continue
+        if c == "'":
+            i = command.find("'", i + 1)
+            if i < 0:
+                return None
+        elif c == '"':
+            stack.append(_Context(True, i))
+        elif c == "#" and (i == 0 or command[i - 1] in " \t\n;&|()"):
+            i = command.find("\n", i)
+            if i < 0:
+                break
+            continue
+        elif c == "(":
+            stack.append(_Context(False, i + 1))
+        elif c == ")":
+            if len(stack) == 1:
+                return None
+            end_command(stack.pop(), i)
+        elif command.startswith("<<<", i):
+            i += 2
+        elif command.startswith("<<", i):
+            if not (m := _HEREDOC_OP.match(command, i)):
+                return None
+            doc = _Heredoc(m[1] == "-", m[3], ctx.in_quoted_subst)
+            docs.append(doc)
+            ctx.docs.append(doc)
+            pending.append(doc)
+            i = m.end()
+            continue
+        elif c in ";&|":
+            end_command(ctx, i)
+        elif c == "\n":
+            end_command(ctx, i)
+            for doc in pending:
+                start, line = i + 1, None
+                while line != doc.delim:
+                    if i >= n:
+                        return None
+                    nl = command.find("\n", i + 1)
+                    end = n if nl < 0 else nl
+                    line = command[i + 1 : end]
+                    line = line.lstrip("\t") if doc.strip_tabs else line
+                    i = end
+                doc.body = (start, i)
+            if pending:
+                pending = []
+                continue
+        i += 1
+    if len(stack) > 1 or pending:
+        return None
+    end_command(stack[0], n)
+    return docs
+
+
+def _reads_prose(doc: _Heredoc) -> bool:
+    """Whether *doc*'s reader takes its body as text it never runs."""
+    try:
+        words = shlex.split(_HEREDOC_OP.sub(" ", doc.reader))
+    except ValueError:
+        return False
+    if words[:2] in (["git", "commit"], ["git", "tag"]):
+        return "--file=-" in words or ("-F", "-") in zip(words, words[1:])
+    return words == ["cat"] and doc.in_quoted_subst
+
+
 def _write_scan_text(command: str) -> str:
-    """The part of *command* whose tokens can make it a write."""
-    stripped = strip_heredocs(command)
-    text = command if _RUNS_TEXT.search(stripped) else stripped
+    """The part of *command* whose tokens can make it a write.
+
+    Heredoc bodies leave it only on the terms the module docstring states;
+    otherwise the whole command is scanned.
+    """
+    text, docs = command, _heredocs(command)
+    if docs and all(map(_reads_prose, docs)):
+        stripped = command
+        for doc in reversed(docs):
+            stripped = stripped[: doc.body[0]] + stripped[doc.body[1] :]
+        text = command if _RUNS_TEXT.search(stripped) else stripped
     return _EMAIL_SPAN.sub("", _BENIGN_REDIRECT.sub("", text))
 
 

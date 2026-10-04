@@ -969,12 +969,62 @@ def test_writers_the_token_list_missed_are_denied(command: str) -> None:
         "git add docs/decisions.md && git commit -F - <<'EOF'\n"
         "Proposed -> reviewed in docs/decisions.md\nEOF",
         "python3 tools/lint.py < docs/decisions.md",
+        "git commit -m \"$(cat <<'EOF'\n"
+        "Proposed -> reviewed in docs/decisions.md\nEOF\n)\"",
+        "git tag -a v1 --file=- <<'EOF'\n"
+        "Proposed -> reviewed in docs/decisions.md\nEOF",
     ],
 )
 def test_reads_with_benign_redirects_or_prose_are_allowed(
     command: str,
 ) -> None:
     assert not _denied(_bash(command))
+
+
+_SED = "sed -i s/a/b/ docs/decisions.md"
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # A quoted or commented `<<` opens no heredoc: the next line runs.
+        f'echo "<<X"\n{_SED}',
+        f"# <<X\n{_SED}",
+        # No terminator line: what the body is cannot be told.
+        f"cat <<X\n{_SED}",
+        # Readers that run a script read from stdin.
+        "awk -f - /dev/null <<'EOF'\n"
+        'BEGIN{print "x" > "docs/decisions.md"}\nEOF',
+        "sed -n -f - x <<EOF\nw docs/decisions.md\nEOF",
+        "printf 'w docs/decisions.md' | sed -n -f /dev/stdin x",
+        # A substitution's output run as a command, at once or later.
+        f"$(cat <<'EOF'\n{_SED}\nEOF\n)",
+        f"sudo $(cat <<'EOF'\n{_SED}\nEOF\n)",
+        f"M=\"$(cat <<'EOF'\n{_SED}\nEOF\n)\"; $M",
+    ],
+)
+def test_heredoc_bodies_a_shell_may_run_are_scanned(command: str) -> None:
+    assert _denied(_bash(command))
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["echo x >&1/docs/decisions.md", "echo x >/dev/null.md docs/decisions.md"],
+)
+def test_a_redirect_that_only_starts_benign_is_denied(command: str) -> None:
+    # `>&1/…` opens a file, not a descriptor; `/dev/null.md` is not
+    # /dev/null. Only the whole shell word makes a redirect benign.
+    assert _denied(_bash(command))
+
+
+def test_a_log_path_after_a_quoted_heredoc_opener_is_reached(
+    tmp_path: Path,
+) -> None:
+    # Reading `<<X` in quotes as a heredoc hid the line naming the log.
+    doc = _decisions_file(tmp_path / "my repo")
+    payload = _bash(f'echo "<<X"\nsed -i s/a/b/ "{doc}"')
+    payload["cwd"] = str(_bare_checkout(tmp_path))
+    assert _denied(payload, cwd=tmp_path)
 
 
 @pytest.mark.parametrize("quote", ['"{}"', "{}"])
