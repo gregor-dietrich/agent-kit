@@ -38,10 +38,13 @@ Bash arm's below.
 
 The Bash tool cannot be vetted the same way, so any command that mentions
 decisions.md AND carries a write-shaped token (in-place editors, redirects,
-tee/mv/cp/apply_patch, git checkout/restore, inline interpreters) is denied
-with a pointer to Edit/Write; plain reads (grep/cat/git log) pass. An
-argv-list ``command`` is scanned like a string one, and a ``bash -lc
-<script>`` wrapper is unwrapped to the script it runs.
+tee/mv/cp/apply_patch, git checkout/restore, inline interpreters and ones
+reading a script from stdin) is denied with a pointer to Edit/Write; plain
+reads (grep/cat/git log, redirects to /dev/null) pass. A heredoc body is
+prose unless something in the command executes text (eval, source, an
+interpreter), so a commit message is not read as a command. An argv-list
+``command`` is scanned like a string one, and a ``bash -lc <script>``
+wrapper is unwrapped to the script it runs.
 
 That arm is best-effort by design, and its limits are stated rather than
 chased: a command that never spells the name (``decisions.m''d``, a glob,
@@ -98,6 +101,8 @@ from hook_lib import (
     is_guarded_suffix,
     payload_cwd,
     read_payload,
+    strip_heredocs,
+    tokenize_lines,
     tool_input,
 )
 
@@ -150,18 +155,38 @@ _EMAIL_SPAN = re.compile(r"<[^<>\s]+@[^<>\s]+>")
 # not match. `apply_patch` is a first-class writer and belongs here for
 # the same reason `tee`/`mv` do — Codex spells it as argv[0] of a shell
 # call.
+# An interpreter also runs a script it reads from stdin: one passed as `-`,
+# a heredoc or here-string, or a pipe into an interpreter given no script
+# argument (`python3 x.py < log` reads the log as data and is not matched).
 _OPTS = r"(?:\s+-[A-Za-z]+)*"
+_INTERPRETERS = (
+    r"\b(?:python3?(?:\.\d+)?|node|ruby|perl|sh|bash|zsh|dash|ksh|ash)\b"
+)
 _BASH_WRITE_TOKENS = re.compile(
-    r"(?:\bsed\b[^|;&]*\s-[A-Za-z]*i"
+    r"(?:\bsed\b[^|;&]*\s(?:-[A-Za-z]*i|--in-place)"
     r"|\bperl\b[^|;&]*\s-[A-Za-z]*i"
     r"|>"
-    r"|\bawk\b[^|;&]*\s-i\s*inplace"
+    r"|\b[gmn]?awk\b[^|;&]*\s(?:-i|--include)[\s=]*inplace"
     r"|\b(?:tee|mv|cp|dd|truncate|sponge|install|rsync|apply_patch)\b"
-    r"|\b(?:ln|patch|ed|ex)\b"
+    r"|\b(?:ln|patch|ed|ex|vi|vim|nvim)\b"
     r"|\bgit\b[^|;&]*\s(?:checkout|restore|apply|am|mv|rm|stash)\b"
     r"|\bpython3?(?:\.\d+)?\b[^|;&]*\s-[A-Za-z]*c\b"
     r"|\b(?:node|ruby|perl)\b[^|;&]*\s-[A-Za-z]*e\b"
-    r"|\b(?:sh|bash|zsh|dash|ksh|ash)\b" + _OPTS + r"\s+-[A-Za-z]*c\b)"
+    r"|\b(?:sh|bash|zsh|dash|ksh|ash)\b" + _OPTS + r"\s+-[A-Za-z]*c\b"
+    r"|" + _INTERPRETERS + r"[^|;&]*(?:\s-(?=\s|$)|<<)"
+    r"|\|\s*" + _INTERPRETERS + _OPTS + r"[ \t]*(?:$|[\n|;&)]))"
+)
+
+# Redirects that cannot write the log: to /dev/null, or duplicating a file
+# descriptor. Counting them as writes denied `grep … 2>/dev/null`.
+_BENIGN_REDIRECT = re.compile(r"(?:\d*|&)>>?\s*/dev/null\b|\d*>&(?:\d+|-)")
+
+# Words that execute text handed to them. Without one, a heredoc body is
+# prose — a commit message saying `Proposed -> reviewed` read as a redirect
+# — and is left out of the scan; with one, the body may be the command.
+_RUNS_TEXT = re.compile(
+    r"\b(?:eval|source|xargs|at|batch)\b|(?:^|[;&|(]\s*)\.\s|" + _INTERPRETERS,
+    re.MULTILINE,
 )
 
 GUARDED = "docs/decisions.md"
@@ -249,8 +274,10 @@ _QUOTES = str.maketrans("\u2018\u2019\u201c\u201d", "''\"\"")
 _RELOCATES = re.compile(
     r"\b(?:cd|pushd)\b|\bgit\b[^|;&]*\s(?:-C|--git-dir|--work-tree)\b"
 )
-# A path-shaped word naming the log, as a shell command spells it.
+# A path-shaped word naming the log, as a shell command spells it, and the
+# same inside one shell word, where a quoted or escaped space is part of it.
 _LOG_WORD = re.compile(r"[^\s'\"<>|;&()=]*decisions\.md", re.IGNORECASE)
+_LOG_IN_WORD = re.compile(r"[^'\"<>|;&()=]*decisions\.md", re.IGNORECASE)
 
 
 def _is_guarded(path: str) -> bool:
@@ -278,12 +305,22 @@ def _command_may_reach_log(payload: dict[str, Any], command: str) -> bool:
     """
     if _checkout_has_log(payload) or _RELOCATES.search(command):
         return True
-    for word in _LOG_WORD.findall(command):
+    words = set(_LOG_WORD.findall(command))
+    for tokens in tokenize_lines(command):
+        words.update(w for tok in tokens for w in _LOG_IN_WORD.findall(tok))
+    for word in words:
         expanded = os.path.expandvars(os.path.expanduser(word))
         path = absolute_path(payload, expanded)
         if path.is_file() and _is_guarded(str(path)):
             return True
     return False
+
+
+def _write_scan_text(command: str) -> str:
+    """The part of *command* whose tokens can make it a write."""
+    stripped = strip_heredocs(command)
+    text = command if _RUNS_TEXT.search(stripped) else stripped
+    return _EMAIL_SPAN.sub("", _BENIGN_REDIRECT.sub("", text))
 
 
 def _checkout_has_log(payload: dict[str, Any]) -> bool:
@@ -479,10 +516,9 @@ def main() -> None:
 
     if tool == "Bash":
         command = command_text(ti)
-        scannable = _EMAIL_SPAN.sub("", command)
         if (
             "decisions.md" in command.lower()
-            and _BASH_WRITE_TOKENS.search(scannable)
+            and _BASH_WRITE_TOKENS.search(_write_scan_text(command))
             and _command_may_reach_log(data, command)
         ):
             deny(

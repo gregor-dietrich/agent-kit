@@ -942,6 +942,54 @@ def test_other_writers_are_denied(command: str) -> None:
     assert _denied(_bash(command))
 
 
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "sed --in-place s/a/b/ docs/decisions.md",
+        "sed --in-place=.bak s/a/b/ docs/decisions.md",
+        "gawk -i inplace '{print}' docs/decisions.md",
+        "vim -es -c '%s/a/b/' -c wq docs/decisions.md",
+        "python3 - <<'EOF'\nopen('docs/decisions.md', 'w')\nEOF",
+        "node <<'EOF'\n"
+        "require('fs').writeFileSync('docs/decisions.md', '')\nEOF",
+        "echo \"open('docs/decisions.md', 'w')\" | python3",
+        "eval \"$(cat <<'EOF'\nsed -i s/a/b/ docs/decisions.md\nEOF\n)\"",
+    ],
+)
+def test_writers_the_token_list_missed_are_denied(command: str) -> None:
+    assert _denied(_bash(command))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "grep -n Status docs/decisions.md 2>/dev/null",
+        "grep -q Status docs/decisions.md >/dev/null 2>&1",
+        "git add docs/decisions.md && git commit -F - <<'EOF'\n"
+        "Proposed -> reviewed in docs/decisions.md\nEOF",
+        "python3 tools/lint.py < docs/decisions.md",
+    ],
+)
+def test_reads_with_benign_redirects_or_prose_are_allowed(
+    command: str,
+) -> None:
+    assert not _denied(_bash(command))
+
+
+@pytest.mark.parametrize("quote", ['"{}"', "{}"])
+def test_bash_write_to_a_log_path_with_a_space_is_denied(
+    tmp_path: Path, quote: str
+) -> None:
+    root = tmp_path / "my repo"
+    doc = _decisions_file(root)
+    escaped = str(doc).replace(" ", "\\ ")
+    spelled = str(doc) if quote.startswith('"') else escaped
+    payload = _bash(f"sed -i s/a/b/ {quote.format(spelled)}")
+    payload["cwd"] = str(_bare_checkout(tmp_path))
+    assert _denied(payload, cwd=tmp_path)
+
+
 def test_git_reads_of_the_log_are_allowed() -> None:
     assert not _denied(_bash("git log -p docs/decisions.md"))
     assert not _denied(_bash("git diff HEAD~1 -- docs/decisions.md"))
