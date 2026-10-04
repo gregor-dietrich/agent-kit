@@ -165,10 +165,9 @@ def test_a_relative_edit_path_resolves_against_the_payload_cwd(
 #
 # Every other test builds its payloads from the same assumption the hooks
 # make, so the suite alone could not detect a schema mismatch. These were
-# captured from a live `codex exec` turn (codex-cli 0.147.0) by wrapping the
-# registered hooks to tee their stdin, and sanitised of host paths, session
-# identifiers and the command's own argument. Re-capture after a Codex
-# upgrade that touches hooks.
+# captured from a live Codex session (codex-cli 0.160.0) by wrapping the
+# registered hooks to record their stdin, and sanitised of host paths and
+# session identifiers. Re-capture after a Codex upgrade that touches hooks.
 
 
 def test_captured_payloads_name_the_tools_the_guards_branch_on() -> None:

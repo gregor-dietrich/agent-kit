@@ -2,8 +2,8 @@
   "PreToolUse:Bash": {
     "cwd": "/repo",
     "hook_event_name": "PreToolUse",
-    "model": "gpt-5.6-sol",
-    "permission_mode": "bypassPermissions",
+    "model": "gpt-6.1-sol",
+    "permission_mode": "default",
     "session_id": "<session_id>",
     "tool_input": {
       "command": "sed -n '1,240p' README.md"
@@ -16,8 +16,8 @@
   "PreToolUse:apply_patch": {
     "cwd": "/repo",
     "hook_event_name": "PreToolUse",
-    "model": "gpt-5.6-sol",
-    "permission_mode": "bypassPermissions",
+    "model": "gpt-6.1-sol",
+    "permission_mode": "default",
     "session_id": "<session_id>",
     "tool_input": {
       "command": "*** Begin Patch\n*** Add File: probe_tmp.txt\n+hello\n*** End Patch"
