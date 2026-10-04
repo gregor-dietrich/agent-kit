@@ -8,13 +8,23 @@
 # there, so the vast majority of payloads — which cannot concern
 # docs/decisions.md at all — are dropped by a bash substring test before
 # Python starts. Conservative by construction: ANY mention of
-# "decisions.md" in the payload falls through to the exact checks in Python.
+# "decisions.md" in the payload falls through to the exact checks in Python,
+# and so does an Edit/Write whose file_path resolves to the log through a
+# symlink — a lexical test alone would wave that edit through unseen.
 
 set -euo pipefail
 
 input=$(cat)
 case "$input" in
 *decisions.md*) ;;
+*'"file_path"'*)
+	# Escaped quotes inside a JSON string never match '"file_path": "',
+	# so this reads the tool_input field and not a mention in content.
+	path=$(printf '%s' "$input" |
+		sed -n 's/.*"file_path": *"\([^"]*\)".*/\1/p')
+	resolved=$(realpath -m -- "$path" 2>/dev/null || true)
+	[[ -n "$path" && "$resolved" == */docs/decisions.md ]] || exit 0
+	;;
 *) exit 0 ;;
 esac
 

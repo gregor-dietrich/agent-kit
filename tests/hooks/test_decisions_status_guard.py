@@ -658,3 +658,68 @@ def test_codex_patch_adding_a_log_is_allowed(tmp_path: Path) -> None:
         },
     }
     assert not _denied(payload, cwd=root)
+
+
+# --- routes around the no-op and the lexical path test ----------------------
+
+
+def test_bash_write_by_absolute_path_from_a_bare_cwd_is_denied(
+    tmp_path: Path,
+) -> None:
+    # The cwd's checkout keeps no log, but the command names one that
+    # exists elsewhere: the no-op must not become the way around the guard.
+    doc = _decisions_file(tmp_path / "logged")
+    root = _bare_checkout(tmp_path)
+    payload = _bash(f"sed -i s/Proposed/Accepted/ {doc}")
+    payload["cwd"] = str(root)
+    assert _denied(payload, cwd=root)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd ../logged && sed -i s/Proposed/Accepted/ docs/decisions.md",
+        "git -C ../logged checkout HEAD~1 -- docs/decisions.md",
+    ],
+)
+def test_bash_write_after_changing_directory_is_denied(
+    tmp_path: Path, command: str
+) -> None:
+    # Where the command ends up running cannot be resolved here, so its
+    # target is assumed to be a log rather than ruled out.
+    root = _bare_checkout(tmp_path)
+    payload = _bash(command)
+    payload["cwd"] = str(root)
+    assert _denied(payload, cwd=root)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git checkout HEAD~3 -- docs/decisions.md",
+        "git restore --source HEAD~3 docs/decisions.md",
+        "patch docs/decisions.md < x.diff",
+        "ln -sf other.md docs/decisions.md",
+        "awk -i inplace '{print}' docs/decisions.md",
+        "node -e \"require('fs').writeFileSync('docs/decisions.md', '')\"",
+    ],
+)
+def test_other_writers_are_denied(command: str) -> None:
+    # Reverting the file to an older revision de-ratifies as surely as an
+    # edit; each of these rewrites it without passing through Edit/Write.
+    assert _denied(_bash(command))
+
+
+def test_git_reads_of_the_log_are_allowed() -> None:
+    assert not _denied(_bash("git log -p docs/decisions.md"))
+    assert not _denied(_bash("git diff HEAD~1 -- docs/decisions.md"))
+
+
+def test_an_edit_through_a_symlink_is_vetted(tmp_path: Path) -> None:
+    # The lexical suffix test sees `notes.md`; the file that changes is the
+    # log, so the resolved path is tested too.
+    doc = _decisions_file(tmp_path)
+    link = tmp_path / "notes.md"
+    link.symlink_to(doc)
+    payload = _edit(link, "**Status:** Proposed", "**Status:** Accepted")
+    assert _denied(payload)

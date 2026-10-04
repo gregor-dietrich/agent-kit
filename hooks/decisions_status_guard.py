@@ -38,9 +38,12 @@ argv-list ``command`` is scanned like a string one, and a ``bash -lc
 <script>`` wrapper is unwrapped to the script it runs.
 
 A no-op in a repository that keeps no decisions log: an edit is vetted only
-when the file it targets already exists, and a Bash command only when the
-checkout it runs in (found by walking up from the payload's cwd to the
-directory holding ``.git``) has a docs/decisions.md.
+when the file it targets already exists, and a Bash command only when it
+could reach one — the checkout it runs in (found by walking up from the
+payload's cwd to the directory holding ``.git``) has a docs/decisions.md,
+a log-shaped path it names exists, or it changes directory first, which
+leaves its target unknowable here. The guarded path is matched lexically
+and after resolving symlinks.
 
 Scope, honestly: this constrains Claude Code and Codex tool calls only, in
 whatever checkout they target (the path test is a suffix match, so worktrees
@@ -60,6 +63,7 @@ Receives tool invocation JSON on stdin. Claude Edit/Write uses
 the wire-format plumbing is shared across hooks via hook_lib.py.
 """
 
+import os
 import re
 import sys
 from pathlib import Path
@@ -100,7 +104,9 @@ _HEADING = re.compile(r"^## (ADR-\d+)", re.MULTILINE)
 _EMAIL_SPAN = re.compile(r"<[^<>\s]+@[^<>\s]+>")
 
 # Write-shaped tokens for the Bash route: in-place editors, any redirect,
-# file movers/writers, inline interpreters. Conservative on purpose — a
+# file movers/writers, inline interpreters, and the git subcommands that
+# rewrite a tracked file in place (`git checkout HEAD~3 -- <log>` reverts
+# a ratification as surely as an edit does). Conservative on purpose — a
 # false deny costs a re-phrase; a false allow costs the invariant.
 # `-c` is matched as a combined short option too (`bash -lc`, `python3
 # -uc`) and in its separated form (`bash -l -c`): `-lc` is the standard
@@ -116,8 +122,12 @@ _BASH_WRITE_TOKENS = re.compile(
     r"(?:\bsed\b[^|;&]*\s-[A-Za-z]*i"
     r"|\bperl\b[^|;&]*\s-[A-Za-z]*i"
     r"|>"
+    r"|\bawk\b[^|;&]*\s-i\s*inplace"
     r"|\b(?:tee|mv|cp|dd|truncate|sponge|install|rsync|apply_patch)\b"
+    r"|\b(?:ln|patch|ed|ex)\b"
+    r"|\bgit\b[^|;&]*\s(?:checkout|restore|apply|am|mv|rm|stash)\b"
     r"|\bpython3?(?:\.\d+)?\b[^|;&]*\s-[A-Za-z]*c\b"
+    r"|\b(?:node|ruby|perl)\b[^|;&]*\s-[A-Za-z]*e\b"
     r"|\b(?:sh|bash|zsh|dash|ksh|ash)\b" + _OPTS + r"\s+-[A-Za-z]*c\b)"
 )
 
@@ -183,8 +193,43 @@ def _vet(before: str, after: str) -> None:
             )
 
 
+# Words after which the command no longer runs where the payload's cwd
+# says: the log it reaches cannot be located from here, so its presence is
+# assumed rather than ruled out.
+_RELOCATES = re.compile(
+    r"\b(?:cd|pushd)\b|\bgit\b[^|;&]*\s(?:-C|--git-dir|--work-tree)\b"
+)
+# A path-shaped word naming the log, as a shell command spells it.
+_LOG_WORD = re.compile(r"[^\s'\"<>|;&()=]*decisions\.md")
+
+
 def _is_guarded(path: str) -> bool:
-    return is_guarded_suffix(path, GUARDED)
+    """Whether *path* names the log, lexically or once symlinks resolve.
+
+    The lexical test alone missed an edit made through a symlink whose own
+    name is something else; the resolved path is what actually changes.
+    """
+    return is_guarded_suffix(path, GUARDED) or is_guarded_suffix(
+        os.path.realpath(path), GUARDED
+    )
+
+
+def _command_may_reach_log(payload: dict[str, Any], command: str) -> bool:
+    """Whether a shell command could touch an existing decisions log.
+
+    False only when nothing it names can be one: the cwd's checkout keeps
+    no log, every log-shaped word it names resolves to no existing log, and
+    it does not move elsewhere first. Anything this cannot see past counts
+    as reaching one — the no-op is for repositories without a log, never a
+    way around the guard in one that has one.
+    """
+    if _checkout_has_log(payload) or _RELOCATES.search(command):
+        return True
+    for word in _LOG_WORD.findall(command):
+        path = absolute_path(payload, os.path.expanduser(word))
+        if path.is_file() and _is_guarded(str(path)):
+            return True
+    return False
 
 
 def _checkout_has_log(payload: dict[str, Any]) -> bool:
@@ -354,7 +399,7 @@ def main() -> None:
         if (
             "decisions.md" in command
             and _BASH_WRITE_TOKENS.search(scannable)
-            and _checkout_has_log(data)
+            and _command_may_reach_log(data, command)
         ):
             deny(
                 "Refused: this shell command looks like it writes "
