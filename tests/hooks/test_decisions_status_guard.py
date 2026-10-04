@@ -653,6 +653,68 @@ def test_a_flip_hidden_behind_markup_is_denied(
     assert _denied(_edit(doc, "**Status:** Proposed", new))
 
 
+# --- status values: non-ASCII letters are held like Accepted ---------------
+# Cyrillic А (U+0410), Cyrillic е (U+0435) and Greek Α (U+0391) render as
+# Latin letters; without a confusables table the guard cannot read such a
+# value, so no edit may add or remove one.
+
+_LOOK_ALIKES = ["Аccepted", "Acceptеd", "Αccepted"]
+
+
+@pytest.mark.parametrize("value", _LOOK_ALIKES)
+def test_drafting_an_entry_with_a_look_alike_value_is_denied(
+    tmp_path: Path, value: str
+) -> None:
+    # Read as neither Proposed nor Accepted, this entry was allowed while
+    # rendering as ratified: rule 2 by another spelling.
+    doc = _decisions_file(tmp_path)
+    payload = _edit(
+        doc,
+        "**Decision:** settled one.\n",
+        "**Decision:** settled one.\n\n"
+        f"## ADR-0003 — new\n\n**Status:** {value}\n\n**Decision:** mine.\n",
+    )
+    assert _denied(payload)
+
+
+@pytest.mark.parametrize("old", ["Proposed", "Accepted"])
+@pytest.mark.parametrize("value", _LOOK_ALIKES)
+def test_rewriting_a_status_as_a_look_alike_is_denied(
+    tmp_path: Path, old: str, value: str
+) -> None:
+    doc = _decisions_file(tmp_path)
+    assert _denied(_edit(doc, f"**Status:** {old}", f"**Status:** {value}"))
+
+
+def test_retiring_an_entry_in_a_non_ascii_word_is_denied(
+    tmp_path: Path,
+) -> None:
+    # Counting such a value AS Accepted would have let this through: the
+    # Accepted count stays at one while the reader sees a retired entry.
+    doc = _decisions_file(tmp_path)
+    payload = _edit(doc, "**Status:** Accepted", "**Status:** Abgelöst")
+    assert _denied(payload)
+
+
+def test_removing_a_look_alike_value_is_denied(tmp_path: Path) -> None:
+    # Demoting a value that renders as Accepted to Proposed loses no marker
+    # the guard can name, so the non-ASCII count's loss is what denies it.
+    doc = _decisions_file(
+        tmp_path, _DOC.replace("Status:** Accepted", "Status:** Аccepted")
+    )
+    payload = _edit(doc, "**Status:** Аccepted", "**Status:** Proposed")
+    assert _denied(payload)
+
+
+def test_prose_edit_beside_a_look_alike_value_is_allowed(
+    tmp_path: Path,
+) -> None:
+    doc = _decisions_file(
+        tmp_path, _DOC.replace("Status:** Accepted", "Status:** Аccepted")
+    )
+    assert not _denied(_edit(doc, "settled one.", "settled, and why."))
+
+
 def test_an_unclosed_comment_hides_what_follows(tmp_path: Path) -> None:
     doc = _decisions_file(tmp_path)
     new = "**Status:** Accepted <!-- **Status:** Proposed"

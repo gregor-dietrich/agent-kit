@@ -32,8 +32,11 @@ exact spelling is a job for the project's own format check, not this hook.
 Markers are counted both in the text as written and as it renders (HTML
 comments and tags, entities, invisible format characters, compatibility
 forms and markup around the value resolved), and a blocked move in either
-view is denied. A value spelled with look-alike letters from another
-script is not recognised — a stated limit.
+view is denied. A value with any non-ASCII letter is neither Proposed nor
+Accepted but held like Accepted, in a count of its own: one may be neither
+added nor removed. Look-alike letters from another script (Cyrillic А in
+``Аccepted``) render as Accepted, and the stdlib has no confusables table
+to read them by, so refusing them costs only a re-spelling.
 
 A no-op in a repository that keeps no decisions log: an edit is vetted only
 when the file it targets already exists. The guarded path is matched
@@ -96,10 +99,11 @@ ACCEPTED = "**Status:** Accepted"
 # whitespace between the tokens are therefore both free; the value word
 # itself is what classifies the marker. Markup inside or around the value
 # (`Accepted`, _**Accepted**_, [Accepted](#), Ac*cep*ted) is dropped from
-# it before it is read.
+# it before it is read. The value is read in letters of any script, so a
+# look-alike spelling is captured whole rather than cut off or missed.
 _STATUS_MARKER = re.compile(
     r"(?:\*\*|__)\s*Status\s*:?\s*(?:\*\*|__)\s*:?\s*"
-    r"[\s*_`\[]*(?P<value>[A-Za-z][A-Za-z*_`-]*)",
+    r"[\s*_`\[]*(?P<value>[^\W\d_](?:[^\W\d]|[*`-])*)",
     re.IGNORECASE,
 )
 _VALUE_MARKUP = str.maketrans("", "", "*_`")
@@ -128,25 +132,26 @@ def _rendered(text: str) -> str:
     return "".join(c for c in text if unicodedata.category(c) != "Cf")
 
 
-def _marker_counts(block: str) -> tuple[int, int]:
-    """(proposed, accepted) markers in *block*, however cased or spaced."""
+def _marker_counts(block: str) -> tuple[int, int, int]:
+    """(proposed, accepted, non-ASCII) markers in *block*, however spelled."""
     values = [
         m.group("value").translate(_VALUE_MARKUP).lower()
         for m in _STATUS_MARKER.finditer(block)
     ]
-    return values.count("proposed"), values.count("accepted")
+    foreign = sum(not v.isascii() for v in values)
+    return values.count("proposed"), values.count("accepted"), foreign
 
 
-def _entry_status_counts(text: str) -> dict[str, tuple[int, int]]:
-    """Per-ADR (proposed, accepted) marker counts; ``""`` is non-entry text."""
+def _entry_status_counts(text: str) -> dict[str, tuple[int, ...]]:
+    """Per-ADR ``_marker_counts``; ``""`` is non-entry text."""
     matches = list(_HEADING.finditer(text))
     first = matches[0].start() if matches else len(text)
     counts = {"": _marker_counts(text[:first])}
     for i, m in enumerate(matches):
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        p, a = counts.get(m.group(1), (0, 0))
-        block_p, block_a = _marker_counts(text[m.start() : end])
-        counts[m.group(1)] = (p + block_p, a + block_a)
+        block = _marker_counts(text[m.start() : end])
+        prev = counts.get(m.group(1), (0, 0, 0))
+        counts[m.group(1)] = tuple(map(sum, zip(prev, block)))
     return counts
 
 
@@ -165,8 +170,8 @@ def _vet_view(before: str, after: str) -> None:
     old = _entry_status_counts(before)
     new = _entry_status_counts(after)
     for adr in sorted(set(old) | set(new)):
-        old_p, old_a = old.get(adr, (0, 0))
-        new_p, new_a = new.get(adr, (0, 0))
+        old_p, old_a, old_f = old.get(adr, (0, 0, 0))
+        new_p, new_a, new_f = new.get(adr, (0, 0, 0))
         where = adr or "outside any ADR entry"
         if new_p < old_p:
             deny(
@@ -190,6 +195,15 @@ def _vet_view(before: str, after: str) -> None:
                 "granting it, and a route to re-raising a decision by "
                 "first demoting it. Retiring a spent entry counts as well. "
                 "Ask the maintainer to make the change."
+            )
+        if new_f != old_f:
+            deny(
+                f"Refused: this edit {'adds' if new_f > old_f else 'removes'} "
+                f"a status value spelled with non-ASCII letters ({where}) in "
+                "docs/decisions.md. Such a value can render as Accepted while "
+                "reading as neither Proposed nor Accepted, so it is held like "
+                "Accepted. Spell a new status in ASCII letters; to change an "
+                "existing one, ask the maintainer."
             )
 
 
