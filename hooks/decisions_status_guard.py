@@ -29,9 +29,10 @@ A marker is recognised by its VALUE, case-insensitively and whatever
 whitespace separates the tokens: ``**Status:** accepted`` renders as a
 ratified entry to every reader, so it must count as one here. Enforcing one
 exact spelling is a job for the project's own format check, not this hook.
-Markers are counted in the text as it renders: HTML comments and tags,
-entities, invisible format characters, compatibility forms and markup
-around the value are resolved first. A value spelled with look-alike
+Markers are counted both in the text as written and as it renders (HTML
+comments and tags, entities, invisible format characters, compatibility
+forms and markup around the value resolved), and a blocked move in either
+view is denied. A value spelled with look-alike
 letters from another script is not recognised — a stated limit, like the
 Bash arm's below.
 
@@ -119,10 +120,14 @@ _STATUS_MARKER = re.compile(
 )
 _VALUE_MARKUP = str.maketrans("", "", "*_`")
 
-# What a reader never sees: an HTML comment (an unclosed one hides the rest
-# of the page) and the tags themselves. A comment kept a Proposed marker in
-# the source while the page showed only the Accepted written next to it.
-_UNRENDERED = re.compile(r"<!--.*?(?:-->|\Z)|<[^<>]*>", re.DOTALL)
+# What a reader never sees: a closed HTML comment and the tags themselves.
+# A comment kept a Proposed marker in the source while the page showed only
+# the Accepted written next to it. Only tag-shaped `<…>` is stripped: `3 < 5`
+# is text. This view is an approximation of rendering, so `_vet` judges the
+# raw text as well and denies when either view shows a blocked move.
+_UNRENDERED = re.compile(
+    r"<!--.*?-->|</?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?/?>", re.DOTALL
+)
 
 _HEADING = re.compile(r"^## (ADR-\d+)", re.MULTILINE)
 
@@ -179,7 +184,6 @@ def _marker_counts(block: str) -> tuple[int, int]:
 
 def _entry_status_counts(text: str) -> dict[str, tuple[int, int]]:
     """Per-ADR (proposed, accepted) marker counts; ``""`` is non-entry text."""
-    text = _rendered(text)
     matches = list(_HEADING.finditer(text))
     first = matches[0].start() if matches else len(text)
     counts = {"": _marker_counts(text[:first])}
@@ -192,7 +196,17 @@ def _entry_status_counts(text: str) -> dict[str, tuple[int, int]]:
 
 
 def _vet(before: str, after: str) -> None:
-    """Deny iff any entry (or the non-entry remainder) makes a blocked move."""
+    """Deny iff any entry (or the non-entry remainder) makes a blocked move.
+
+    Judged on the raw text and on the rendered view alike: where the two
+    disagree about what a span hides, the stricter reading wins.
+    """
+    _vet_view(before, after)
+    _vet_view(_rendered(before), _rendered(after))
+
+
+def _vet_view(before: str, after: str) -> None:
+    """One view's verdict; see ``_vet``."""
     old = _entry_status_counts(before)
     new = _entry_status_counts(after)
     for adr in sorted(set(old) | set(new)):

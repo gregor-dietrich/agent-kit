@@ -799,6 +799,31 @@ def test_an_unclosed_comment_hides_what_follows(tmp_path: Path) -> None:
     assert _denied(_edit(doc, "**Status:** Proposed", new))
 
 
+
+def test_a_bare_angle_bracket_does_not_hide_a_marker(tmp_path: Path) -> None:
+    # `3 < 5` is text, not a tag: stripping `<…>` across it erased the
+    # Accepted marker the reader still sees.
+    doc = _decisions_file(tmp_path)
+    new = (
+        "**Decision:** settled one.\n\n## ADR-0003 — new\n\n"
+        "Note: 3 < 5\n\n**Status:** Accepted\n\nso 5 > 3\n"
+    )
+    assert _denied(_edit(doc, "**Decision:** settled one.\n", new))
+
+
+def test_a_comment_opener_in_a_code_span_hides_nothing(
+    tmp_path: Path,
+) -> None:
+    # Rendered, `<!--` in a code span is literal text and the page goes on;
+    # read as an unclosed comment it silenced every rule after it.
+    doc = _decisions_file(
+        tmp_path, _DOC.replace("draft one.", "draft one. `<!--`")
+    )
+    new = "**Decision:** settled one.\n\n## ADR-0003\n\n**Status:** Accepted\n"
+    assert _denied(_edit(doc, "**Decision:** settled one.\n", new))
+    assert _denied(_edit(doc, "**Status:** Proposed", "**Status:** Accepted"))
+
+
 def test_prose_edit_in_a_log_with_comments_is_allowed(tmp_path: Path) -> None:
     doc = _decisions_file(
         tmp_path, _DOC.replace("draft one.", "draft one. <!-- todo -->")
