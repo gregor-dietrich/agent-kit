@@ -14,7 +14,7 @@ def _load(relative: str) -> dict[str, Any]:
 def test_claude_and_codex_manifests_agree() -> None:
     claude = _load(".claude-plugin/plugin.json")
     codex = _load(".codex-plugin/plugin.json")
-    for key in ("name", "version"):
+    for key in ("name", "version", "license"):
         assert codex[key] == claude[key], key
 
 
