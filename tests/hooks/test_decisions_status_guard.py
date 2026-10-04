@@ -1016,6 +1016,14 @@ _SED = "sed -i s/a/b/ docs/decisions.md"
         # Commands that run their argument: only git's message is prose.
         f"watch \"$(cat <<'EOF'\n{_SED}\nEOF\n)\"",
         f"su -c \"$(cat <<'EOF'\n{_SED}\nEOF\n)\"",
+        # An unquoted delimiter expands the body before git reads it.
+        f"git commit --allow-empty -F - <<EOF\n$({_SED})\nEOF",
+        f"git commit -m \"$(cat <<EOF\n$({_SED})\nEOF\n)\"",
+        # A `git` that is not git, or a message run once git holds it.
+        f"git() {{ $2; }}; git commit \"$(cat <<'EOF'\n{_SED}\nEOF\n)\"",
+        f"PATH=/tmp/x:$PATH; git commit -F - <<'EOF'\n{_SED}\nEOF",
+        f"git commit -F - <<'EOF'\n{_SED}\nEOF\n"
+        "if true; then $(git log -1 --format=%B); fi",
     ],
 )
 def test_heredoc_bodies_a_shell_may_run_are_scanned(command: str) -> None:

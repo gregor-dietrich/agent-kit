@@ -42,15 +42,16 @@ tee/mv/cp/apply_patch, git checkout/restore, inline interpreters and ones
 reading a script from stdin) is denied with a pointer to Edit/Write; plain
 reads (grep/cat/git log, redirects to /dev/null) pass. A heredoc body is
 left out of the scan only when the shell would read it as one and nothing
-can run it: every ``<<`` in the command is a real operator with its
+can run it: every ``<<`` in the command is a real operator with a quoted
+delimiter (an unquoted one expands ``$(…)`` in the body) and its
 terminator line, each is read by ``git commit``/``git tag`` with ``-F -``
 or ``--file=-``, or by a bare ``cat`` in a quoted ``"$(…)"`` passed to
-``git commit``/``git tag``, and nothing could re-read a message to run it
+``git commit``/``git tag``, nothing redefines ``git`` (a function, alias,
+``hash`` or ``PATH``), and nothing could re-read a message to run it
 (eval, an interpreter, a command word that is an expansion). So a commit
 message is not read as a command, and everything else is scanned whole.
-An argv-list
-``command`` is scanned like a string one, and a ``bash -lc <script>``
-wrapper is unwrapped to the script it runs.
+An argv-list ``command`` is scanned like a string one, and a ``bash -lc
+<script>`` wrapper is unwrapped to the script it runs.
 
 That arm is best-effort by design, and its limits are stated rather than
 chased: a command that never spells the name (``decisions.m''d``, a glob,
@@ -196,13 +197,16 @@ _BENIGN_REDIRECT = re.compile(
     r"(?:(?:\d*|&)>>?\s*/dev/null|\d*>&(?:\d+|-))(?=[\s;&|)]|$)"
 )
 
-# What can run a dropped body once git holds it: `eval "$(git log -1
-# --format=%B)"` re-reads the message as a command. Words that execute
-# text, and a command word that is an expansion; with one present, the
+# What can run a dropped body once git holds it, or make `git` something
+# else: `eval "$(git log -1 --format=%B)"` re-reads the message as a
+# command, and `git() { $2; }` turns the message into one. Words that
+# execute text or redefine a command, a function definition, a PATH
+# change, and a command word that is an expansion; with one present, the
 # whole command is scanned.
 _RUNS_TEXT = re.compile(
-    r"\b(?:eval|source|xargs|at|batch)\b|(?:^|[;&|(])\s*(?:\.\s|\"?\$)|"
-    + _INTERPRETERS,
+    r"\b(?:eval|source|xargs|at|batch|alias|function|hash)\b|\w\s*\(\s*\)"
+    r"|\bPATH\+?=|(?:^|[;&|({!]|\b(?:if|then|elif|else|while|until|do|time"
+    r"|exec|command)\b)\s*(?:\.\s|\"?\$)|" + _INTERPRETERS,
     re.MULTILINE,
 )
 
@@ -340,6 +344,7 @@ def _command_may_reach_log(payload: dict[str, Any], command: str) -> bool:
 class _Heredoc:
     strip_tabs: bool
     delim: str
+    quoted: bool  # a quoted delimiter: the body is not expanded
     reader: str = ""  # the simple command the operator belongs to
     consumer: str | None = None  # the one a `"$(…)"` around it feeds
     body: tuple[int, int] = (0, 0)  # through the terminator line
@@ -413,7 +418,7 @@ def _heredocs(command: str) -> list[_Heredoc] | None:
         elif command.startswith("<<", i):
             if not (m := _HEREDOC_OP.match(command, i)):
                 return None
-            doc = _Heredoc(m[1] == "-", m[3])
+            doc = _Heredoc(m[1] == "-", m[3], bool(m[2]))
             docs.append(doc)
             ctx.docs.append(doc)
             if ctx.outer:
@@ -463,7 +468,7 @@ def _reads_prose(doc: _Heredoc) -> bool:
     Judged on who consumes it, never on what might run it: a list of
     commands that execute text (`watch`, `su -c`, …) is never complete.
     """
-    words = _words(doc.reader)
+    words = _words(doc.reader) if doc.quoted else []
     if words[:2] in _GIT_MESSAGE:
         return "--file=-" in words or ("-F", "-") in zip(words, words[1:])
     return words == ["cat"] and _words(doc.consumer or "")[:2] in _GIT_MESSAGE
