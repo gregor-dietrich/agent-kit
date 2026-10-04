@@ -11,7 +11,7 @@ that can break silently.
 | ---- | ---------- |
 | `.claude-plugin/` | Claude Code plugin manifest, and the marketplace manifest that makes this repo installable |
 | `.codex-plugin/plugin.json` | The Codex twin: same name and version, plus Codex's `interface` block |
-| `hooks/` | `hooks.json` (read by both clients) and the guard scripts it registers |
+| `hooks/` | `hooks.json` (read by both clients), the guard scripts it registers, and `session-context.md`, the only text injected into every session |
 | `skills/` | One `<name>/SKILL.md` per skill, shared by both clients |
 | `agents/` | Generic role definitions (Claude Code only; Codex plugins carry no agents) |
 | `tests/` | pytest suite; every hook is pinned here |
@@ -36,4 +36,5 @@ that can break silently.
 - `make test` — syncs `.venv` from `uv.lock` (bootstrapping the pinned
   uv when none is found) and runs pytest. CI runs the same target.
 - `claude plugin validate .` — after any manifest, hook, skill or agent
-  change. The two `author` warnings are expected.
+  change. Expected warnings: the two missing `author` fields, and the
+  root `CLAUDE.md` not being plugin context (it is this repository's).

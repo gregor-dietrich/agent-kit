@@ -52,6 +52,7 @@ def test_the_guards_are_wired_to_the_tools_they_guard() -> None:
         for event, matcher, command in _registrations()
     }
     assert wired == {
+        ("SessionStart", "", "session-context.sh"),
         ("PreToolUse", "Bash", "pipe-status-guard.sh"),
         ("PreToolUse", "Bash", "tea-guard.sh"),
         ("PreToolUse", "Bash", "decisions-status-guard.sh"),
@@ -84,7 +85,10 @@ def _probe(matcher: str, script: str, root: Path) -> dict[str, Any]:
     }
 
 
-@pytest.mark.parametrize(("event", "matcher", "command"), _registrations())
+_GUARDS = [r for r in _registrations() if r[0] == "PreToolUse"]
+
+
+@pytest.mark.parametrize(("event", "matcher", "command"), _GUARDS)
 def test_the_registered_command_denies_end_to_end(
     event: str, matcher: str, command: str, tmp_path: Path
 ) -> None:
@@ -110,3 +114,31 @@ def test_the_registered_command_denies_end_to_end(
     )
     assert result.returncode == 0, result.stderr
     assert '"permissionDecision": "deny"' in result.stdout
+
+
+def test_session_context_is_injected_verbatim(tmp_path: Path) -> None:
+    [(_, _, command)] = [r for r in _registrations() if r[0] == "SessionStart"]
+    result = subprocess.run(
+        ["sh", "-c", command],
+        cwd=tmp_path,
+        env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(_ROOT)},
+        input="{}",
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    context = (_ROOT / "hooks" / "session-context.md").read_text(
+        encoding="utf-8"
+    )
+    assert result.stdout == context
+
+
+def test_session_context_stays_small() -> None:
+    # It is injected into every session in every repository the plugin is
+    # installed for; anything longer belongs in a skill.
+    context = (_ROOT / "hooks" / "session-context.md").read_text(
+        encoding="utf-8"
+    )
+    assert len(context) <= 1200
