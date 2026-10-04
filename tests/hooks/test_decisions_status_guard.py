@@ -984,6 +984,8 @@ def test_writers_the_token_list_missed_are_denied(command: str) -> None:
         "Proposed -> reviewed in docs/decisions.md\nEOF\n)\"",
         "git tag -a v1 --file=- <<'EOF'\n"
         "Proposed -> reviewed in docs/decisions.md\nEOF",
+        "git add docs/decisions.md && git commit -m \"$(cat <<'EOF'\n"
+        "Proposed -> reviewed in docs/decisions.md\nEOF\n)\" && git push",
     ],
 )
 def test_reads_with_benign_redirects_or_prose_are_allowed(
@@ -1024,6 +1026,14 @@ _SED = "sed -i s/a/b/ docs/decisions.md"
         f"PATH=/tmp/x:$PATH; git commit -F - <<'EOF'\n{_SED}\nEOF",
         f"git commit -F - <<'EOF'\n{_SED}\nEOF\n"
         "if true; then $(git log -1 --format=%B); fi",
+        f"git commit -F - <<'EOF'\n{_SED}\nEOF\nX=1 $(git log -1 --format=%B)",
+        f"git commit -F - <<'EOF'\n{_SED}\nEOF\nenv $(git log -1 --format=%B)",
+        f"git commit -F - <<'EOF'\n{_SED}\nEOF\n"
+        'watch "$(git log -1 --format=%B)"',
+        f"git commit -F - <<'EOF'\n{_SED}\nEOF\n"
+        "git log -1 --format=%B | parallel",
+        f"git commit -F - <<'EOF'\n{_SED}\nEOF\n"
+        "git -c core.pager=sh log -p -1 --format=%B",
     ],
 )
 def test_heredoc_bodies_a_shell_may_run_are_scanned(command: str) -> None:

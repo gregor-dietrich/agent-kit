@@ -46,10 +46,12 @@ can run it: every ``<<`` in the command is a real operator with a quoted
 delimiter (an unquoted one expands ``$(…)`` in the body) and its
 terminator line, each is read by ``git commit``/``git tag`` with ``-F -``
 or ``--file=-``, or by a bare ``cat`` in a quoted ``"$(…)"`` passed to
-``git commit``/``git tag``, nothing redefines ``git`` (a function, alias,
-``hash`` or ``PATH``), and nothing could re-read a message to run it
-(eval, an interpreter, a command word that is an expansion). So a commit
-message is not read as a command, and everything else is scanned whole.
+``git commit``/``git tag``, and the rest is nothing but plain ``git
+add|commit|tag|push|status`` commands joined by ``&&``, ``||``, ``;`` or
+newlines, with no expansion, pipe or other redirect. Guessing what else
+could re-read and run a message was tried and never converged. So a
+commit message is not read as a command, and everything else is scanned
+whole.
 An argv-list ``command`` is scanned like a string one, and a ``bash -lc
 <script>`` wrapper is unwrapped to the script it runs.
 
@@ -195,19 +197,6 @@ _BASH_WRITE_TOKENS = re.compile(
 # a whole shell word: `>&1/x` opens a file, and /dev/null.md is not null.
 _BENIGN_REDIRECT = re.compile(
     r"(?:(?:\d*|&)>>?\s*/dev/null|\d*>&(?:\d+|-))(?=[\s;&|)]|$)"
-)
-
-# What can run a dropped body once git holds it, or make `git` something
-# else: `eval "$(git log -1 --format=%B)"` re-reads the message as a
-# command, and `git() { $2; }` turns the message into one. Words that
-# execute text or redefine a command, a function definition, a PATH
-# change, and a command word that is an expansion; with one present, the
-# whole command is scanned.
-_RUNS_TEXT = re.compile(
-    r"\b(?:eval|source|xargs|at|batch|alias|function|hash)\b|\w\s*\(\s*\)"
-    r"|\bPATH\+?=|(?:^|[;&|({!]|\b(?:if|then|elif|else|while|until|do|time"
-    r"|exec|command)\b)\s*(?:\.\s|\"?\$)|" + _INTERPRETERS,
-    re.MULTILINE,
 )
 
 # A heredoc operator and its delimiter: a name, optionally quoted.
@@ -474,6 +463,48 @@ def _reads_prose(doc: _Heredoc) -> bool:
     return words == ["cat"] and _words(doc.consumer or "")[:2] in _GIT_MESSAGE
 
 
+# What may share a command line with a dropped body: git subcommands that
+# run no text, spelled without `-c`, an env prefix or anything else that
+# could make `git` something other than git or re-read the message.
+_GIT_ONLY = {"add", "commit", "tag", "push", "status"}
+# A `"$(cat <<'EOF' … EOF)"` message once its body is cut: only a heredoc
+# this guard parsed and dropped leaves that shape.
+_CUT_MESSAGE = re.compile(r"\$\(cat <<-?(['\"])[A-Za-z_][\w-]*\1\n\n\s*\)")
+_SEPARATORS = {"&&", "||", ";"}
+
+
+def _git_only(text: str) -> bool:
+    """Whether *text* is nothing but plain git commands, as `_GIT_ONLY`.
+
+    A token holding ``$`` or a backquote, or an operator other than a
+    separator and ``<<`` (a pipe, ``&``, a redirect, a paren), fails it.
+    """
+    lex = shlex.shlex(
+        _CUT_MESSAGE.sub("MSG", text).replace("\n", ";"),
+        posix=True,
+        punctuation_chars=True,
+    )
+    lex.whitespace_split = True
+    try:
+        tokens = list(lex)
+    except ValueError:
+        return False
+    commands: list[list[str]] = [[]]
+    for tok in tokens:
+        if tok in _SEPARATORS:
+            commands.append([])
+        elif tok != "<<":
+            commands[-1].append(tok)
+    return all(
+        len(cmd) > 1
+        and cmd[0] == "git"
+        and cmd[1] in _GIT_ONLY
+        and not any("$" in t or "`" in t or not t.strip("();<>|&") for t in cmd)
+        for cmd in commands
+        if cmd
+    )
+
+
 def _write_scan_text(command: str) -> str:
     """The part of *command* whose tokens can make it a write.
 
@@ -485,7 +516,7 @@ def _write_scan_text(command: str) -> str:
         stripped = command
         for doc in reversed(docs):
             stripped = stripped[: doc.body[0]] + stripped[doc.body[1] :]
-        text = command if _RUNS_TEXT.search(stripped) else stripped
+        text = stripped if _git_only(stripped) else command
     return _EMAIL_SPAN.sub("", _BENIGN_REDIRECT.sub("", text))
 
 
