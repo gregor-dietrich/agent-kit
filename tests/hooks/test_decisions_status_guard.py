@@ -1,0 +1,660 @@
+"""Behavioral pin for the decisions-log status guard hook (``hooks/``).
+
+Runs the real hook — the bash prefilter wrapper plus the Python guard — as a
+subprocess with crafted tool JSON, covering the routes a review found around
+an earlier fragment-counting version: partial-marker Edits,
+compound edits whose global marker counts net to zero, secondary-checkout /
+worktree paths, and write-shaped Bash commands.
+
+These tests are load-bearing: a crashed PreToolUse hook fails OPEN in the
+harness (only exit 2 or an emitted deny payload blocks), so a broken guard
+denies nothing and nothing else would notice.
+"""
+
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+
+_ROOT = Path(__file__).resolve().parents[2]
+_HOOK = _ROOT / "hooks" / "decisions-status-guard.sh"
+
+_DOC = (
+    "## ADR-0001 — a draft\n\n"
+    "**Date:** d · **Status:** Proposed\n\n"
+    "**Decision:** draft one.\n\n"
+    "## ADR-0002 — settled\n\n"
+    "**Date:** d · **Status:** Accepted\n\n"
+    "**Decision:** settled one.\n"
+)
+
+
+def _run(payload: dict[str, object], cwd: Path | None = None) -> str:
+    result = subprocess.run(
+        ["bash", str(_HOOK)],
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+        cwd=None if cwd is None else str(cwd),
+    )
+    return result.stdout
+
+
+def _denied(payload: dict[str, object], cwd: Path | None = None) -> bool:
+    return '"permissionDecision": "deny"' in _run(payload, cwd)
+
+
+def _decisions_file(tmp_path: Path, text: str = _DOC) -> Path:
+    doc = tmp_path / "docs" / "decisions.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_text(text, encoding="utf-8")
+    return doc
+
+
+@pytest.fixture(autouse=True)
+def _in_a_checkout_with_a_log(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run every hook from a checkout that keeps a decisions log.
+
+    A payload without ``cwd`` resolves against the hook process's own cwd,
+    and the Bash arm is a no-op in a checkout without a log — so the tests
+    that pin it need one to stand in.
+    """
+    root = tmp_path_factory.mktemp("checkout")
+    (root / ".git").mkdir()
+    _decisions_file(root)
+    monkeypatch.chdir(root)
+
+
+def _edit(path: Path, old: str, new: str) -> dict[str, object]:
+    return {
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": str(path),
+            "old_string": old,
+            "new_string": new,
+        },
+    }
+
+
+def _bash(command: str) -> dict[str, object]:
+    return {"tool_name": "Bash", "tool_input": {"command": command}}
+
+
+def _patch_header(cwd: Path, header: str, body: str) -> dict[str, object]:
+    """An apply_patch payload whose Update File header is given verbatim."""
+    return {
+        "cwd": str(cwd),
+        "tool_name": "apply_patch",
+        "tool_input": {
+            "command": "*** Begin Patch\n"
+            f"*** Update File: {header}\n"
+            f"{body}"
+            "*** End Patch"
+        },
+    }
+
+
+def _patch(root: Path, body: str) -> dict[str, object]:
+    return _patch_header(root, "docs/decisions.md", body)
+
+
+_FLIP_HUNK = (
+    "@@\n"
+    "-**Date:** d · **Status:** Proposed\n"
+    "+**Date:** d · **Status:** Accepted\n"
+)
+_PROSE_HUNK = (
+    "@@\n"
+    "-**Decision:** settled one.\n"
+    "+**Decision:** settled one (amended d2).\n"
+)
+
+
+# --- Edit: the three blocked transitions ------------------------------------
+
+
+def test_flip_to_accepted_is_denied(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    payload = _edit(doc, "**Status:** Proposed", "**Status:** Accepted")
+    assert _denied(payload)
+
+
+def test_writing_a_new_entry_as_accepted_is_denied(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    payload = _edit(
+        doc,
+        "**Decision:** settled one.\n",
+        "**Decision:** settled one.\n\n"
+        "## ADR-0003 — new\n\n**Status:** Accepted\n\n**Decision:** mine.\n",
+    )
+    assert _denied(payload)
+
+
+def test_deleting_a_draft_is_denied(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    payload = _edit(
+        doc,
+        "## ADR-0001 — a draft\n\n"
+        "**Date:** d · **Status:** Proposed\n\n"
+        "**Decision:** draft one.\n\n",
+        "",
+    )
+    assert _denied(payload)
+
+
+def test_deratification_is_denied(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    payload = _edit(doc, "**Status:** Accepted", "**Status:** Proposed")
+    assert _denied(payload)
+
+
+# --- Edit: the bypass routes the review reproduced --------------------------
+
+
+def test_partial_fragment_flip_is_denied(tmp_path: Path) -> None:
+    # The fragments exclude the marker prefix — fragment counting saw 0/0.
+    doc = _decisions_file(tmp_path)
+    payload = _edit(doc, "Status:** Proposed", "Status:** Accepted")
+    assert _denied(payload)
+
+
+def test_net_zero_compound_edit_is_denied(tmp_path: Path) -> None:
+    # One edit demotes ADR-0002 while drafting a new Accepted ADR-0003:
+    # global counts net to zero; per-entry comparison still catches both.
+    doc = _decisions_file(tmp_path)
+    payload = _edit(
+        doc,
+        "## ADR-0002 — settled\n\n**Date:** d · **Status:** Accepted\n",
+        "## ADR-0002 — settled\n\n**Date:** d · **Status:** Proposed\n\n"
+        "## ADR-0003 — new\n\n**Date:** d · **Status:** Accepted\n",
+    )
+    assert _denied(payload)
+
+
+def test_secondary_checkout_paths_are_guarded(tmp_path: Path) -> None:
+    # The guard matches any */docs/decisions.md, not one anchored checkout —
+    # tmp_path stands in for a worktree the project dir does not point at.
+    doc = _decisions_file(tmp_path)
+    assert _denied(_edit(doc, "**Status:** Proposed", "**Status:** Accepted"))
+
+
+# --- Edit/Write: legitimate acts pass ---------------------------------------
+
+
+def test_drafting_a_proposed_entry_is_allowed(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    payload = _edit(
+        doc,
+        "**Decision:** settled one.\n",
+        "**Decision:** settled one.\n\n"
+        "## ADR-0003 — new\n\n**Status:** Proposed\n\n**Decision:** mine.\n",
+    )
+    assert not _denied(payload)
+
+
+def test_prose_amendment_is_allowed(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    payload = _edit(doc, "settled one.", "settled one (amended d2).")
+    assert not _denied(payload)
+
+
+def test_write_preserving_markers_is_allowed(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    payload: dict[str, object] = {
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": str(doc),
+            "content": _DOC + "\namended prose.\n",
+        },
+    }
+    assert not _denied(payload)
+
+
+def test_write_dropping_an_accepted_marker_is_denied(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    payload: dict[str, object] = {
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": str(doc),
+            "content": _DOC.replace("**Status:** Accepted", ""),
+        },
+    }
+    assert _denied(payload)
+
+
+def test_edit_whose_old_string_is_absent_is_allowed(tmp_path: Path) -> None:
+    # The Edit tool itself will fail; there is nothing to vet.
+    doc = _decisions_file(tmp_path)
+    assert not _denied(_edit(doc, "no such text", "**Status:** Accepted"))
+
+
+def test_other_files_are_not_guarded(tmp_path: Path) -> None:
+    other = tmp_path / "notes-on-decisions.md"
+    other.write_text("**Status:** Proposed\n", encoding="utf-8")
+    payload = _edit(other, "**Status:** Proposed", "**Status:** Accepted")
+    assert not _denied(payload)
+
+
+# --- Codex apply_patch: the same transitions and safe edits ----------------
+
+
+def test_codex_flip_to_accepted_is_denied(tmp_path: Path) -> None:
+    _decisions_file(tmp_path)
+    payload = _patch(
+        tmp_path,
+        "@@\n"
+        "-**Date:** d · **Status:** Proposed\n"
+        "+**Date:** d · **Status:** Accepted\n",
+    )
+    assert _denied(payload)
+
+
+def test_codex_accepted_addition_is_denied(tmp_path: Path) -> None:
+    _decisions_file(tmp_path)
+    payload = _patch(
+        tmp_path,
+        "@@\n"
+        " **Decision:** settled one.\n"
+        "+\n"
+        "+## ADR-0003 — new\n"
+        "+\n"
+        "+**Status:** Accepted\n"
+        "+\n"
+        "+**Decision:** mine.\n",
+    )
+    assert _denied(payload)
+
+
+def test_codex_proposed_removal_is_denied(tmp_path: Path) -> None:
+    _decisions_file(tmp_path)
+    payload = _patch(
+        tmp_path,
+        "@@\n-**Date:** d · **Status:** Proposed\n",
+    )
+    assert _denied(payload)
+
+
+def test_codex_accepted_removal_is_denied(tmp_path: Path) -> None:
+    _decisions_file(tmp_path)
+    payload = _patch(
+        tmp_path,
+        "@@\n-**Date:** d · **Status:** Accepted\n",
+    )
+    assert _denied(payload)
+
+
+def test_codex_proposed_draft_is_allowed(tmp_path: Path) -> None:
+    _decisions_file(tmp_path)
+    payload = _patch(
+        tmp_path,
+        "@@\n"
+        " **Decision:** settled one.\n"
+        "+\n"
+        "+## ADR-0003 — new\n"
+        "+\n"
+        "+**Status:** Proposed\n"
+        "+\n"
+        "+**Decision:** mine.\n",
+    )
+    assert not _denied(payload)
+
+
+def test_codex_prose_amendment_is_allowed(tmp_path: Path) -> None:
+    _decisions_file(tmp_path)
+    payload = _patch(
+        tmp_path,
+        "@@\n"
+        "-**Decision:** settled one.\n"
+        "+**Decision:** settled one (amended d2).\n",
+    )
+    assert not _denied(payload)
+
+
+def test_codex_move_of_decisions_file_is_denied(tmp_path: Path) -> None:
+    _decisions_file(tmp_path)
+    payload: dict[str, object] = {
+        "cwd": str(tmp_path),
+        "tool_name": "apply_patch",
+        "tool_input": {
+            "command": "*** Begin Patch\n"
+            "*** Update File: docs/decisions.md\n"
+            "*** Move to: docs/decisions-archive.md\n"
+            "*** End Patch"
+        },
+    }
+    assert _denied(payload)
+
+
+def test_unparseable_codex_decisions_patch_is_denied(tmp_path: Path) -> None:
+    _decisions_file(tmp_path)
+    payload = _patch(tmp_path, "not a valid hunk\n")
+    assert _denied(payload)
+
+
+# --- Bash: write-shaped commands are denied, reads pass ---------------------
+
+
+def test_bash_in_place_edit_is_denied() -> None:
+    cmd = "sed -i s/Proposed/Accepted/ docs/decisions.md"
+    assert _denied(_bash(cmd))
+
+
+def test_bash_redirect_is_denied() -> None:
+    assert _denied(_bash("echo x >> docs/decisions.md"))
+
+
+def test_bash_read_is_allowed() -> None:
+    assert not _denied(_bash("grep -n Status docs/decisions.md"))
+
+
+def test_bash_git_add_is_allowed() -> None:
+    assert not _denied(_bash("git add docs/decisions.md && git commit"))
+
+
+def test_bash_commit_with_email_trailer_is_allowed() -> None:
+    # The trailer's <user@host> is not a redirect; without the email-span
+    # strip, every standard commit naming the file would be denied.
+    cmd = (
+        "git add docs/decisions.md && git commit -m 'docs: amend\n\n"
+        "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>'"
+    )
+    assert not _denied(_bash(cmd))
+
+
+def test_malformed_payload_fails_open() -> None:
+    result = subprocess.run(
+        ["bash", str(_HOOK)],
+        input="decisions.md but not json",
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0
+    assert '"deny"' not in result.stdout
+
+
+# --- patch headers: whitespace, CR, and a nested cwd ------------------------
+
+
+@pytest.mark.parametrize("suffix", ["\r", " ", "\t"])
+def test_patch_header_with_trailing_whitespace_is_still_guarded(
+    tmp_path: Path, suffix: str
+) -> None:
+    # `re.MULTILINE`'s `$` matches before a `\n` and `.` matches `\r`, so a
+    # CRLF patch — or one stray space — used to capture a path no
+    # guarded-file test matches, and the flip below was allowed outright.
+    _decisions_file(tmp_path)
+    payload = _patch_header(tmp_path, f"docs/decisions.md{suffix}", _FLIP_HUNK)
+    assert _denied(payload)
+
+
+def test_prose_patch_from_a_nested_cwd_is_allowed(tmp_path: Path) -> None:
+    # A session rooted in docs/ writes the header as a bare `decisions.md`.
+    # Judged against the raw header, the guard found no guarded section and
+    # denied the patch as unsimulatable — every prose edit included.
+    doc = _decisions_file(tmp_path)
+    payload = _patch_header(doc.parent, "decisions.md", _PROSE_HUNK)
+    assert not _denied(payload)
+
+
+def test_flip_from_a_nested_cwd_is_denied(tmp_path: Path) -> None:
+    # The pair to the test above: the bare header is resolved, not ignored.
+    doc = _decisions_file(tmp_path)
+    payload = _patch_header(doc.parent, "decisions.md", _FLIP_HUNK)
+    assert _denied(payload)
+
+
+# --- Edit: a relative file_path is resolved against the payload cwd ---------
+
+
+def test_relative_edit_path_is_read_from_the_payload_cwd(
+    tmp_path: Path,
+) -> None:
+    # The hook runs from a directory holding no docs/decisions.md, so
+    # opening the raw relative path found nothing, left `before` empty and
+    # waved the flip through.
+    _decisions_file(tmp_path)
+    payload: dict[str, object] = {
+        "cwd": str(tmp_path),
+        "tool_name": "Edit",
+        "tool_input": {
+            "file_path": "docs/decisions.md",
+            "old_string": "**Status:** Proposed",
+            "new_string": "**Status:** Accepted",
+        },
+    }
+    assert _denied(payload, cwd=tmp_path.parent)
+
+
+# --- apply_patch: blank context lines are context, not a parse failure ------
+
+
+def test_hunk_with_a_blank_context_line_is_allowed(tmp_path: Path) -> None:
+    # apply_patch spells a blank context line as the empty string. Dropping
+    # every empty line to shed the `@@` split artefact took this one with
+    # it, so the simulation could not match its own context and the guard
+    # denied a prose-only edit.
+    _decisions_file(tmp_path)
+    payload = _patch(
+        tmp_path,
+        "@@\n"
+        "-**Decision:** draft one.\n"
+        "+**Decision:** draft one (amended).\n"
+        "\n"
+        " ## ADR-0002 — settled\n",
+    )
+    assert not _denied(payload)
+
+
+def test_flip_in_a_hunk_with_a_blank_context_line_is_denied(
+    tmp_path: Path,
+) -> None:
+    # Keeping blank context lines must not cost the simulation its teeth.
+    _decisions_file(tmp_path)
+    payload = _patch(
+        tmp_path,
+        "@@\n"
+        "-**Date:** d · **Status:** Proposed\n"
+        "+**Date:** d · **Status:** Accepted\n"
+        "\n"
+        " **Decision:** draft one.\n",
+    )
+    assert _denied(payload)
+
+
+# --- Bash: apply_patch, wrapper shells, and argv-list commands -------------
+
+
+def test_bash_apply_patch_heredoc_is_denied() -> None:
+    # apply_patch is a first-class writer; run from a shell it bypassed the
+    # apply_patch route the guard vets.
+    cmd = (
+        'apply_patch <<"PATCH"\n'
+        "*** Begin Patch\n"
+        "*** Update File: docs/decisions.md\n"
+        "@@\n"
+        "-**Status:** Proposed\n"
+        "+**Status:** Accepted\n"
+        "*** End Patch\n"
+        "PATCH\n"
+    )
+    assert _denied(_bash(cmd))
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "bash -lc 'true docs/decisions.md'",
+        "sh -lc 'true docs/decisions.md'",
+        "zsh -ic 'true docs/decisions.md'",
+        "bash -l -c 'true docs/decisions.md'",
+        "python3 -uc 'print(1) docs/decisions.md'",
+    ],
+)
+def test_combined_short_option_interpreters_are_denied(cmd: str) -> None:
+    # `-lc` is the standard wrapper spelling an agent harness emits;
+    # requiring `-c` to be its own contiguous token defeated this whole arm.
+    assert _denied(_bash(cmd))
+
+
+def test_unrelated_dash_c_is_allowed() -> None:
+    # The interpreter arm stays anchored on the interpreter name: a `-c`
+    # belonging to some other tool is not a write.
+    assert not _denied(_bash("cat docs/decisions.md | grep -c Status"))
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["python3", "-c", "open('docs/decisions.md', 'w')"],
+        ["sed", "-i", "s/Proposed/Accepted/", "docs/decisions.md"],
+    ],
+)
+def test_argv_list_command_is_scanned(argv: list[str]) -> None:
+    # Codex's shell tool sends an argv list. `str()` on it yields a Python
+    # repr whose quoting and commas break every adjacency the write-token
+    # patterns rely on, so the guard read these as harmless.
+    payload: dict[str, object] = {
+        "tool_name": "Bash",
+        "tool_input": {"command": argv},
+    }
+    assert _denied(payload)
+
+
+def test_argv_wrapper_script_is_scanned_not_the_wrapper() -> None:
+    # `["bash", "-lc", <script>]` is harness plumbing: the script is the
+    # command, and it is what gets scanned.
+    payload: dict[str, object] = {
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": ["bash", "-lc", "tee docs/decisions.md"],
+        },
+    }
+    assert _denied(payload)
+
+
+def test_argv_wrapper_around_a_read_is_allowed() -> None:
+    payload: dict[str, object] = {
+        "tool_name": "Bash",
+        "tool_input": {
+            "command": ["bash", "-lc", "grep -n Status docs/decisions.md"],
+        },
+    }
+    assert not _denied(payload)
+
+
+# --- status values: caught however they are cased or spaced ----------------
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "**Status:** accepted",
+        "**Status:** ACCEPTED",
+        "**Status:**Accepted",
+        "**Status:**  Accepted",
+        "__Status:__ Accepted",
+    ],
+)
+def test_drafting_an_entry_accepted_in_any_spelling_is_denied(
+    tmp_path: Path, marker: str
+) -> None:
+    # Byte-exact marker counting saw no Accepted marker in any of these, so
+    # the entry was written straight to ratified — and renders as ratified.
+    doc = _decisions_file(tmp_path)
+    payload = _edit(
+        doc,
+        "**Decision:** settled one.\n",
+        "**Decision:** settled one.\n\n"
+        f"## ADR-0003 — new\n\n{marker}\n\n**Decision:** mine.\n",
+    )
+    assert _denied(payload)
+
+
+def test_drafting_a_lowercase_proposed_entry_is_allowed(
+    tmp_path: Path,
+) -> None:
+    # The tolerant match must not turn drafting into a denied act.
+    doc = _decisions_file(tmp_path)
+    payload = _edit(
+        doc,
+        "**Decision:** settled one.\n",
+        "**Decision:** settled one.\n\n"
+        "## ADR-0003 — new\n\n**Status:** proposed\n\n**Decision:** mine.\n",
+    )
+    assert not _denied(payload)
+
+
+def test_lowercase_deratification_is_denied(tmp_path: Path) -> None:
+    # Rewriting `Accepted` as some other word is still de-ratification, and
+    # a case-insensitive match is what notices the reverse move too.
+    doc = _decisions_file(tmp_path)
+    payload = _edit(doc, "**Status:** Accepted", "**Status:** Retired")
+    assert _denied(payload)
+
+
+# --- a no-op in a checkout without a decisions log -------------------------
+
+
+def _bare_checkout(tmp_path: Path) -> Path:
+    root = tmp_path / "bare"
+    (root / ".git").mkdir(parents=True)
+    return root
+
+
+def test_bash_write_without_a_log_is_allowed(tmp_path: Path) -> None:
+    root = _bare_checkout(tmp_path)
+    payload = _bash("echo x >> docs/decisions.md")
+    payload["cwd"] = str(root)
+    assert not _denied(payload, cwd=root)
+
+
+def test_bash_write_from_a_subdirectory_of_a_logged_checkout_is_denied(
+    tmp_path: Path,
+) -> None:
+    # The log is looked up at the checkout root, not at the cwd.
+    _decisions_file(tmp_path)
+    (tmp_path / ".git").mkdir()
+    nested = tmp_path / "src" / "pkg"
+    nested.mkdir(parents=True)
+    payload = _bash("sed -i s/a/b/ ../../docs/decisions.md")
+    payload["cwd"] = str(nested)
+    assert _denied(payload, cwd=nested)
+
+
+def test_creating_a_log_with_an_accepted_entry_is_allowed(
+    tmp_path: Path,
+) -> None:
+    # Starting a decisions log is not a status transition on an existing
+    # one; the guard takes over once the file exists.
+    root = _bare_checkout(tmp_path)
+    payload: dict[str, object] = {
+        "tool_name": "Write",
+        "tool_input": {
+            "file_path": str(root / "docs" / "decisions.md"),
+            "content": _DOC,
+        },
+    }
+    assert not _denied(payload, cwd=root)
+
+
+def test_codex_patch_adding_a_log_is_allowed(tmp_path: Path) -> None:
+    root = _bare_checkout(tmp_path)
+    payload: dict[str, object] = {
+        "cwd": str(root),
+        "tool_name": "apply_patch",
+        "tool_input": {
+            "command": "*** Begin Patch\n"
+            "*** Add File: docs/decisions.md\n"
+            "+## ADR-0001 — x\n"
+            "+**Status:** Accepted\n"
+            "*** End Patch"
+        },
+    }
+    assert not _denied(payload, cwd=root)

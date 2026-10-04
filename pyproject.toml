@@ -13,4 +13,5 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["hooks"]
 addopts = ["-ra", "--strict-markers"]
