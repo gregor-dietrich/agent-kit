@@ -87,6 +87,11 @@ an untrusted hook is indistinguishable, from inside a session, from no
 guard at all. Codex plugins carry no agents, so the five roles are Claude
 Code only.
 
+The hooks run under the first `python3` on `PATH` and need 3.10 or newer.
+Under an older one — the Command Line Tools `python3` on macOS is 3.9 —
+each guard refuses every call that reaches it, with a message naming the
+floor, rather than crashing and so letting everything through.
+
 ## Warning: a broken hook is a silent hook
 
 A `PreToolUse` hook that crashes **fails open** — the tool call proceeds.

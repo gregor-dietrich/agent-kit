@@ -22,8 +22,11 @@ that can break silently.
   fails open — the tool call proceeds — so a broken guard is silent, and
   the tests are what notices. Test what a guard denies *and* what it
   deliberately lets through.
-- Hooks are stdlib-only Python 3.13 plus a bash prefilter, and fail open
-  on any payload they cannot parse. Never block a call you cannot read.
+- Hooks are stdlib-only Python plus a bash prefilter, and fail open on
+  any payload they cannot parse. Never block a call you cannot read.
+  They run under the user's `python3`, not the 3.13 test venv, so hook
+  code stays within `hook_lib.FLOOR` (3.10); below it every guard denies,
+  naming the floor.
   A call a guard *has* read, that targets what it protects but whose
   effect it cannot model (a patch it cannot simulate, an Edit whose
   `old_string` it cannot locate), is denied: passing it is the bypass.

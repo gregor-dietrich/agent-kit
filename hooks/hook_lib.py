@@ -225,6 +225,40 @@ def read_payload() -> dict[str, Any]:
     return cast("dict[str, Any]", data)
 
 
+def deny(reason: str) -> NoReturn:
+    """Emit the PreToolUse deny envelope and end the hook."""
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": reason,
+                }
+            }
+        )
+    )
+    sys.exit(0)
+
+
+# The interpreter is whatever python3 the client finds first on PATH, not
+# the test venv's, and the PEP 604 unions below (`str | None`) are evaluated
+# when their def runs: under 3.9 importing this module raised, the hook
+# crashed, and a crashed PreToolUse hook fails OPEN — every guard allowed.
+# Every entry point imports this module before defining anything of its
+# own, so this check, placed before the first such def, is what each one
+# hits instead. A payload it cannot read still passes, as everywhere.
+FLOOR = (3, 10)
+if sys.version_info < FLOOR:
+    read_payload()
+    deny(
+        f"agent-kit's hooks need Python {FLOOR[0]}.{FLOOR[1]} or newer, but "
+        f"python3 here is {sys.version.split()[0]} ({sys.executable}). Put "
+        "a newer python3 first on PATH; until then this guard refuses each "
+        "call that reaches it rather than letting it through unchecked."
+    )
+
+
 def tool_input(payload: dict[str, Any]) -> dict[str, Any]:
     """The payload's ``tool_input`` object, or ``{}`` when oddly shaped."""
     ti: Any = payload.get("tool_input")
@@ -330,19 +364,3 @@ def changed_paths(payload: dict[str, Any]) -> list[Path]:
             result.append(path)
             seen.add(path)
     return result
-
-
-def deny(reason: str) -> NoReturn:
-    """Emit the PreToolUse deny envelope and end the hook."""
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": reason,
-                }
-            }
-        )
-    )
-    sys.exit(0)
