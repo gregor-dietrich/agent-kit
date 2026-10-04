@@ -24,6 +24,9 @@ that can break silently.
   deliberately lets through.
 - Hooks are stdlib-only Python 3.13 plus a bash prefilter, and fail open
   on any payload they cannot parse. Never block a call you cannot read.
+  A call a guard *has* read, that targets what it protects but whose
+  effect it cannot model (a patch it cannot simulate, an Edit whose
+  `old_string` it cannot locate), is denied: passing it is the bypass.
 - Keep `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` at the
   same `name` and `version`.
 - Name no other repository, project or person in shipped files. Anything

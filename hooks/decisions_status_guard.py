@@ -29,6 +29,11 @@ A marker is recognised by its VALUE, case-insensitively and whatever
 whitespace separates the tokens: ``**Status:** accepted`` renders as a
 ratified entry to every reader, so it must count as one here. Enforcing one
 exact spelling is a job for the project's own format check, not this hook.
+Markers are counted in the text as it renders: HTML comments and tags,
+entities, invisible format characters, compatibility forms and markup
+around the value are resolved first. A value spelled with look-alike
+letters from another script is not recognised — a stated limit, like the
+Bash arm's below.
 
 The Bash tool cannot be vetted the same way, so any command that mentions
 decisions.md AND carries a write-shaped token (in-place editors, redirects,
@@ -72,9 +77,11 @@ Receives tool invocation JSON on stdin. Claude Edit/Write uses
 the wire-format plumbing is shared across hooks via hook_lib.py.
 """
 
+import html
 import os
 import re
 import sys
+import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -102,12 +109,20 @@ ACCEPTED = "**Status:** Accepted"
 # new entry that way slipped the guard while still rendering as a
 # ratified entry to every human reader. The value's case and the
 # whitespace between the tokens are therefore both free; the value word
-# itself is what classifies the marker.
+# itself is what classifies the marker. Markup inside or around the value
+# (`Accepted`, _**Accepted**_, [Accepted](#), Ac*cep*ted) is dropped from
+# it before it is read.
 _STATUS_MARKER = re.compile(
     r"(?:\*\*|__)\s*Status\s*:?\s*(?:\*\*|__)\s*:?\s*"
-    r"(?:\*\*|__|\*|_)?\s*(?P<value>[A-Za-z][A-Za-z-]*)",
+    r"[\s*_`\[]*(?P<value>[A-Za-z][A-Za-z*_`-]*)",
     re.IGNORECASE,
 )
+_VALUE_MARKUP = str.maketrans("", "", "*_`")
+
+# What a reader never sees: an HTML comment (an unclosed one hides the rest
+# of the page) and the tags themselves. A comment kept a Proposed marker in
+# the source while the page showed only the Accepted written next to it.
+_UNRENDERED = re.compile(r"<!--.*?(?:-->|\Z)|<[^<>]*>", re.DOTALL)
 
 _HEADING = re.compile(r"^## (ADR-\d+)", re.MULTILINE)
 
@@ -146,14 +161,25 @@ _BASH_WRITE_TOKENS = re.compile(
 
 GUARDED = "docs/decisions.md"
 
+def _rendered(text: str) -> str:
+    """*text* as a reader sees it, as far as status markers go."""
+    text = html.unescape(_UNRENDERED.sub("", text))
+    text = unicodedata.normalize("NFKC", text)
+    return "".join(c for c in text if unicodedata.category(c) != "Cf")
+
+
 def _marker_counts(block: str) -> tuple[int, int]:
     """(proposed, accepted) markers in *block*, however cased or spaced."""
-    values = [m.group("value").lower() for m in _STATUS_MARKER.finditer(block)]
+    values = [
+        m.group("value").translate(_VALUE_MARKUP).lower()
+        for m in _STATUS_MARKER.finditer(block)
+    ]
     return values.count("proposed"), values.count("accepted")
 
 
 def _entry_status_counts(text: str) -> dict[str, tuple[int, int]]:
     """Per-ADR (proposed, accepted) marker counts; ``""`` is non-entry text."""
+    text = _rendered(text)
     matches = list(_HEADING.finditer(text))
     first = matches[0].start() if matches else len(text)
     counts = {"": _marker_counts(text[:first])}
@@ -198,6 +224,11 @@ def _vet(before: str, after: str) -> None:
             )
 
 
+# Claude's Edit matches old_string through curly/straight quote differences
+# (measured), so an old_string missing verbatim may still apply. Line
+# endings need no such step: read_text already reads CRLF as LF.
+_QUOTES = str.maketrans("\u2018\u2019\u201c\u201d", "''\"\"")
+
 # Words after which the command no longer runs where the payload's cwd
 # says: the log it reaches cannot be located from here, so its presence is
 # assumed rather than ruled out.
@@ -205,7 +236,7 @@ _RELOCATES = re.compile(
     r"\b(?:cd|pushd)\b|\bgit\b[^|;&]*\s(?:-C|--git-dir|--work-tree)\b"
 )
 # A path-shaped word naming the log, as a shell command spells it.
-_LOG_WORD = re.compile(r"[^\s'\"<>|;&()=]*decisions\.md")
+_LOG_WORD = re.compile(r"[^\s'\"<>|;&()=]*decisions\.md", re.IGNORECASE)
 
 
 def _is_guarded(path: str) -> bool:
@@ -213,9 +244,12 @@ def _is_guarded(path: str) -> bool:
 
     The lexical test alone missed an edit made through a symlink whose own
     name is something else; the resolved path is what actually changes.
+    Case-blind, because on a case-insensitive filesystem (macOS, Windows)
+    ``docs/Decisions.md`` is the log, and ``realpath`` does not fix case.
     """
-    return is_guarded_suffix(path, GUARDED) or is_guarded_suffix(
-        os.path.realpath(path), GUARDED
+    return any(
+        is_guarded_suffix(p.lower(), GUARDED)
+        for p in (path, os.path.realpath(path))
     )
 
 
@@ -399,9 +433,14 @@ def _moves_guarded_file(payload: dict[str, Any], command: str) -> bool:
 
 
 def _read(path: Path) -> str:
-    """The log's current text; empty when it cannot be read."""
+    """The log's current text; empty when it cannot be read.
+
+    Undecodable bytes are replaced rather than raised: a UnicodeDecodeError
+    crashed the hook, and a crashed hook fails open. Markers are ASCII, so
+    a replacement character never changes a count.
+    """
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
 
@@ -428,7 +467,7 @@ def main() -> None:
         command = command_text(ti)
         scannable = _EMAIL_SPAN.sub("", command)
         if (
-            "decisions.md" in command
+            "decisions.md" in command.lower()
             and _BASH_WRITE_TOKENS.search(scannable)
             and _command_may_reach_log(data, command)
         ):
@@ -482,12 +521,22 @@ def main() -> None:
     else:
         old_string = str(ti.get("old_string", "") or "")
         new_string = str(ti.get("new_string", "") or "")
-        if not old_string or old_string not in before:
-            sys.exit(0)  # the Edit itself will fail; nothing to vet
-        if ti.get("replace_all"):
-            after = before.replace(old_string, new_string)
+        if old_string not in before:
+            before, old_string, new_string = (
+                t.translate(_QUOTES) for t in (before, old_string, new_string)
+            )
+        if not old_string:
+            # Measured: the Edit fills a blank file, and fails on any other.
+            after = before if before.strip() else new_string
+        elif old_string in before:
+            count = -1 if ti.get("replace_all") else 1
+            after = before.replace(old_string, new_string, count)
         else:
-            after = before.replace(old_string, new_string, 1)
+            deny(
+                "Refused: old_string does not occur in docs/decisions.md, "
+                "so the ADR status guard cannot tell what this edit would "
+                "change. Re-read the file and copy old_string exactly."
+            )
 
     _vet(before, after)
     sys.exit(0)
