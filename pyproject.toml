@@ -1,0 +1,16 @@
+[project]
+name = "agent-kit"
+version = "0.1.0"
+description = "Test environment for the agent-kit plugin; the plugin itself is stdlib-only."
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=9.1.1", "uv>=0.12.23"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers"]

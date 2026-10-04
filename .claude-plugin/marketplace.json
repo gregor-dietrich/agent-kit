@@ -1,0 +1,14 @@
+{
+  "name": "agent-kit",
+  "description": "agent-kit: one plugin for Claude Code and Codex.",
+  "owner": {
+    "name": "agent-kit maintainers"
+  },
+  "plugins": [
+    {
+      "name": "agent-kit",
+      "source": "./",
+      "description": "Guard hooks, review and planning skills, and generic agent roles."
+    }
+  ]
+}
