@@ -987,7 +987,7 @@ def test_writers_the_token_list_missed_are_denied(command: str) -> None:
         "git tag -a v1 --file=- <<'EOF'\n"
         "Proposed -> reviewed in docs/decisions.md\nEOF",
         "git add docs/decisions.md && git commit -m \"$(cat <<'EOF'\n"
-        "Proposed -> reviewed in docs/decisions.md\nEOF\n)\" && git push",
+        "Proposed -> reviewed in docs/decisions.md\nEOF\n)\" && git status",
     ],
 )
 def test_reads_with_benign_redirects_or_prose_are_allowed(
@@ -1036,6 +1036,12 @@ _SED = "sed -i s/a/b/ docs/decisions.md"
         "git log -1 --format=%B | parallel",
         f"git commit -F - <<'EOF'\n{_SED}\nEOF\n"
         "git -c core.pager=sh log -p -1 --format=%B",
+        # A `#` comment ends at its line; the next one still runs.
+        f"git commit -F - <<'EOF' # x\n{_SED}\nEOF\n"
+        'eval "$(git log -1 --format=%B)"',
+        # `git push --receive-pack` runs its value as a command.
+        "git commit -F - <<'EOF' && git push "
+        f"--receive-pack='git log -1 --format=%B | sh #' . HEAD:x\n{_SED}\nEOF",
     ],
 )
 def test_heredoc_bodies_a_shell_may_run_are_scanned(command: str) -> None:

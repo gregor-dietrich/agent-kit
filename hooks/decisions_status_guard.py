@@ -47,7 +47,7 @@ delimiter (an unquoted one expands ``$(…)`` in the body) and its
 terminator line, each is read by ``git commit``/``git tag`` with ``-F -``
 or ``--file=-``, or by a bare ``cat`` in a quoted ``"$(…)"`` passed to
 ``git commit``/``git tag``, and the rest is nothing but plain ``git
-add|commit|tag|push|status`` commands joined by ``&&``, ``||``, ``;`` or
+add|commit|tag|status`` commands joined by ``&&``, ``||``, ``;`` or
 newlines, with no expansion, pipe or other redirect. Guessing what else
 could re-read and run a message was tried and never converged. So a
 commit message is not read as a command, and everything else is scanned
@@ -466,8 +466,9 @@ def _reads_prose(doc: _Heredoc) -> bool:
 
 # What may share a command line with a dropped body: git subcommands that
 # run no text, spelled without `-c`, an env prefix or anything else that
-# could make `git` something other than git or re-read the message.
-_GIT_ONLY = {"add", "commit", "tag", "push", "status"}
+# could make `git` something other than git or re-read the message. Not
+# `push`: its `--receive-pack`/`--exec` value is run as a command.
+_GIT_ONLY = {"add", "commit", "tag", "status"}
 # A `"$(cat <<'EOF' … EOF)"` message once its body is cut: only a heredoc
 # this guard parsed and dropped leaves that shape.
 _CUT_MESSAGE = re.compile(r"\$\(cat <<-?(['\"])[A-Za-z_][\w-]*\1\n\n\s*\)")
@@ -480,22 +481,21 @@ def _git_only(text: str) -> bool:
     A token holding ``$`` or a backquote, or an operator other than a
     separator and ``<<`` (a pipe, ``&``, a redirect, a paren), fails it.
     """
-    lex = shlex.shlex(
-        _CUT_MESSAGE.sub("MSG", text).replace("\n", ";"),
-        posix=True,
-        punctuation_chars=True,
-    )
-    lex.whitespace_split = True
-    try:
-        tokens = list(lex)
-    except ValueError:
-        return False
-    commands: list[list[str]] = [[]]
-    for tok in tokens:
-        if tok in _SEPARATORS:
-            commands.append([])
-        elif tok != "<<":
-            commands[-1].append(tok)
+    commands: list[list[str]] = []
+    for line in _CUT_MESSAGE.sub("MSG", text).split("\n"):
+        # Line by line, with no comments: shlex's `#` runs to the end of
+        # its input, and hid every later line that bash still runs.
+        lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+        lex.whitespace_split, lex.commenters = True, ""
+        commands.append([])
+        try:
+            for tok in lex:
+                if tok in _SEPARATORS:
+                    commands.append([])
+                elif tok != "<<":
+                    commands[-1].append(tok)
+        except ValueError:
+            return False
     return all(
         len(cmd) > 1
         and cmd[0] == "git"
