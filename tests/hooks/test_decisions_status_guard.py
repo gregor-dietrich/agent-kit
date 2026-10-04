@@ -18,7 +18,11 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
+# hooks.json registers the bash prefilter for the Bash tool and the Python
+# guard itself for Write|Edit|apply_patch; each payload runs through the
+# one its tool reaches.
 _HOOK = _ROOT / "hooks" / "decisions-status-guard.sh"
+_GUARD = _ROOT / "hooks" / "decisions_status_guard.py"
 
 _DOC = (
     "## ADR-0001 — a draft\n\n"
@@ -31,8 +35,9 @@ _DOC = (
 
 
 def _run(payload: dict[str, object], cwd: Path | None = None) -> str:
+    bash = payload.get("tool_name") == "Bash"
     result = subprocess.run(
-        ["bash", str(_HOOK)],
+        ["bash", str(_HOOK)] if bash else [str(_GUARD)],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
@@ -366,9 +371,12 @@ def test_bash_commit_with_email_trailer_is_allowed() -> None:
     assert not _denied(_bash(cmd))
 
 
-def test_malformed_payload_fails_open() -> None:
+@pytest.mark.parametrize(
+    "argv", [["bash", str(_HOOK)], [str(_GUARD)]], ids=["bash-arm", "edit-arm"]
+)
+def test_malformed_payload_fails_open(argv: list[str]) -> None:
     result = subprocess.run(
-        ["bash", str(_HOOK)],
+        argv,
         input="decisions.md but not json",
         capture_output=True,
         text=True,
@@ -723,3 +731,16 @@ def test_an_edit_through_a_symlink_is_vetted(tmp_path: Path) -> None:
     link.symlink_to(doc)
     payload = _edit(link, "**Status:** Proposed", "**Status:** Accepted")
     assert _denied(payload)
+
+
+def test_bash_write_through_an_env_var_path_is_denied(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `"$HOME/…/docs/decisions.md"` names a log only once the variable is
+    # expanded; unexpanded, it resolved to nothing and passed as a no-op.
+    _decisions_file(tmp_path / "logged")
+    monkeypatch.setenv("LOGGED_ROOT", str(tmp_path / "logged"))
+    root = _bare_checkout(tmp_path)
+    payload = _bash('sed -i s/a/b/ "$LOGGED_ROOT/docs/decisions.md"')
+    payload["cwd"] = str(root)
+    assert _denied(payload, cwd=root)

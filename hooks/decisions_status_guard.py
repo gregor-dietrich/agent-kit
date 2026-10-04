@@ -32,10 +32,19 @@ exact spelling is a job for the project's own format check, not this hook.
 
 The Bash tool cannot be vetted the same way, so any command that mentions
 decisions.md AND carries a write-shaped token (in-place editors, redirects,
-tee/mv/cp/apply_patch, inline interpreters) is denied with a pointer to
-Edit/Write — best-effort by design; plain reads (grep/cat/git log) pass. An
+tee/mv/cp/apply_patch, git checkout/restore, inline interpreters) is denied
+with a pointer to Edit/Write; plain reads (grep/cat/git log) pass. An
 argv-list ``command`` is scanned like a string one, and a ``bash -lc
 <script>`` wrapper is unwrapped to the script it runs.
+
+That arm is best-effort by design, and its limits are stated rather than
+chased: a command that never spells the name (``decisions.m''d``, a glob,
+a variable, a symlink with another name, a script file written first and
+run second) is not seen by a substring-and-token test, and no such test
+can see all of them. The guard is a guardrail against an agent ratifying
+its own draft in the ordinary course of work, not a sandbox. The edit
+tools are where it holds exactly: Write, Edit and apply_patch payloads
+reach the Python guard unfiltered and are judged on the resolved path.
 
 A no-op in a repository that keeps no decisions log: an edit is vetted only
 when the file it targets already exists, and a Bash command only when it
@@ -226,7 +235,8 @@ def _command_may_reach_log(payload: dict[str, Any], command: str) -> bool:
     if _checkout_has_log(payload) or _RELOCATES.search(command):
         return True
     for word in _LOG_WORD.findall(command):
-        path = absolute_path(payload, os.path.expanduser(word))
+        expanded = os.path.expandvars(os.path.expanduser(word))
+        path = absolute_path(payload, expanded)
         if path.is_file() and _is_guarded(str(path)):
             return True
     return False

@@ -56,14 +56,14 @@ def test_the_guards_are_wired_to_the_tools_they_guard() -> None:
         ("PreToolUse", "Bash", "pipe-status-guard.sh"),
         ("PreToolUse", "Bash", "tea-guard.sh"),
         ("PreToolUse", "Bash", "decisions-status-guard.sh"),
-        ("PreToolUse", "Write|Edit|apply_patch", "decisions-status-guard.sh"),
+        ("PreToolUse", "Write|Edit|apply_patch", "decisions_status_guard.py"),
     }
 
 
 def _probe(matcher: str, script: str, root: Path) -> dict[str, Any]:
     """A payload the registered guard must deny, run from *root*."""
     log = root / "docs" / "decisions.md"
-    if script == "decisions-status-guard.sh" and matcher != "Bash":
+    if script == "decisions_status_guard.py":
         return {
             "cwd": str(root),
             "tool_name": "Edit",
