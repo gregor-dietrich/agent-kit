@@ -15,6 +15,7 @@
 set -euo pipefail
 
 input=$(cat)
+shopt -s nocasematch # docs/Decisions.md is the log on macOS and Windows
 case "$input" in
 *decisions.md*) ;;
 *) exit 0 ;;

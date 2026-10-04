@@ -237,10 +237,80 @@ def test_write_dropping_an_accepted_marker_is_denied(tmp_path: Path) -> None:
     assert _denied(payload)
 
 
-def test_edit_whose_old_string_is_absent_is_allowed(tmp_path: Path) -> None:
-    # The Edit tool itself will fail; there is nothing to vet.
+def test_edit_whose_old_string_cannot_be_located_is_denied(
+    tmp_path: Path,
+) -> None:
+    # Passing it on the premise that "the Edit itself will fail" was wrong:
+    # Claude's Edit matches through quote and line-ending differences (see
+    # below), so an unlocated old_string is denied, not assumed harmless.
     doc = _decisions_file(tmp_path)
-    assert not _denied(_edit(doc, "no such text", "**Status:** Accepted"))
+    assert _denied(_edit(doc, "no such text", "**Status:** Accepted"))
+
+
+# Measured against Claude Code's Edit tool: curly quotes in old_string match
+# straight ones in the file, an LF old_string matches a CRLF file, and an
+# empty old_string fills a blank file (and fails on any other).
+
+
+def test_flip_through_curly_quote_matching_is_denied(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path, _DOC.replace("draft one", '"draft" one'))
+    old = "**Status:** Proposed\n\n**Decision:** \u201cdraft\u201d one."
+    assert _denied(_edit(doc, old, old.replace("Proposed", "Accepted")))
+
+
+def test_flip_through_line_ending_matching_is_denied(tmp_path: Path) -> None:
+    doc = tmp_path / "docs" / "decisions.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_bytes(_DOC.replace("\n", "\r\n").encode())
+    old = "**Status:** Proposed\n\n**Decision:** draft one."
+    assert _denied(_edit(doc, old, old.replace("Proposed", "Accepted")))
+
+
+def test_prose_edit_through_line_ending_matching_is_allowed(
+    tmp_path: Path,
+) -> None:
+    doc = tmp_path / "docs" / "decisions.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_bytes(_DOC.replace("\n", "\r\n").encode())
+    old = "**Decision:** draft one.\n\n## ADR-0002"
+    assert not _denied(_edit(doc, old, old.replace("one", "two")))
+
+
+@pytest.mark.parametrize("blank", ["", "  \n"])
+def test_filling_a_blank_log_with_an_accepted_entry_is_denied(
+    tmp_path: Path, blank: str
+) -> None:
+    doc = _decisions_file(tmp_path, blank)
+    new = "## ADR-0001 — x\n\n**Status:** Accepted\n"
+    assert _denied(_edit(doc, "", new))
+    assert not _denied(_edit(doc, "", new.replace("Accepted", "Proposed")))
+
+
+def test_empty_old_string_on_a_written_log_is_allowed(tmp_path: Path) -> None:
+    # Claude's Edit refuses it ("file already exists"); nothing changes.
+    doc = _decisions_file(tmp_path)
+    assert not _denied(_edit(doc, "", "**Status:** Accepted\n"))
+
+
+def test_undecodable_log_still_vets_a_flip(tmp_path: Path) -> None:
+    # A UnicodeDecodeError crashed the hook, and a crashed hook fails open.
+    doc = tmp_path / "docs" / "decisions.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_bytes(_DOC.encode().replace(b"draft one", b"Caf\xe9"))
+    assert _denied(_edit(doc, "**Status:** Proposed", "**Status:** Accepted"))
+    assert _denied(_patch(tmp_path, _FLIP_HUNK))
+
+
+@pytest.mark.parametrize("name", ["Decisions.md", "DECISIONS.md"])
+def test_a_differently_cased_log_name_is_guarded(
+    tmp_path: Path, name: str
+) -> None:
+    # On a case-insensitive filesystem (macOS, Windows) this IS the log.
+    doc = tmp_path / "docs" / name
+    doc.parent.mkdir(parents=True)
+    doc.write_text(_DOC, encoding="utf-8")
+    assert _denied(_edit(doc, "**Status:** Proposed", "**Status:** Accepted"))
+    assert _denied(_bash(f"sed -i s/Proposed/Accepted/ docs/{name}"))
 
 
 def test_other_files_are_not_guarded(tmp_path: Path) -> None:
@@ -693,6 +763,47 @@ def test_lowercase_deratification_is_denied(tmp_path: Path) -> None:
     doc = _decisions_file(tmp_path)
     payload = _edit(doc, "**Status:** Accepted", "**Status:** Retired")
     assert _denied(payload)
+
+
+
+# --- status values: counted as they render ---------------------------------
+# A comment keeps a Proposed marker in the source while the page shows only
+# the new value, so each value below must count as the Accepted it renders
+# as — and the commented-out Proposed must not count at all.
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "`Accepted`",
+        "_**Accepted**_",
+        "[Accepted](#)",
+        "<span>Accepted</span>",
+        "Acc\u200bepted",
+        "&#65;ccepted",
+        "\uff21ccepted",
+        "Ac*cep*ted",
+    ],
+)
+def test_a_flip_hidden_behind_markup_is_denied(
+    tmp_path: Path, value: str
+) -> None:
+    doc = _decisions_file(tmp_path)
+    new = f"**Status:** {value} <!-- **Status:** Proposed -->"
+    assert _denied(_edit(doc, "**Status:** Proposed", new))
+
+
+def test_an_unclosed_comment_hides_what_follows(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    new = "**Status:** Accepted <!-- **Status:** Proposed"
+    assert _denied(_edit(doc, "**Status:** Proposed", new))
+
+
+def test_prose_edit_in_a_log_with_comments_is_allowed(tmp_path: Path) -> None:
+    doc = _decisions_file(
+        tmp_path, _DOC.replace("draft one.", "draft one. <!-- todo -->")
+    )
+    assert not _denied(_edit(doc, "<!-- todo -->", "<!-- done -->"))
 
 
 # --- a no-op in a checkout without a decisions log -------------------------

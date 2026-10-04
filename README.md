@@ -101,7 +101,9 @@ clients do and requires a deny. Change a hook only with its tests.
 - The decisions guard's Bash arm is best-effort: it sees a command that
   spells `decisions.md` and carries a write-shaped token, and nothing that
   hides the name (quoting tricks, globs, variables, symlinks, a script run
-  second). The edit tools — Write, Edit, apply_patch — are where it holds.
+  second). The edit tools — Write, Edit, apply_patch — are where it holds,
+  reading markers as they render; a status value spelled with look-alike
+  letters from another script is not recognised.
 - Hooks read no project configuration and detect no project kind yet;
   that lands with the first hook that branches on one.
 - Two method rules — debugging, and design exploration — are held back
