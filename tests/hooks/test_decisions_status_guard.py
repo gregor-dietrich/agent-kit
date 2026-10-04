@@ -945,6 +945,8 @@ def test_bash_write_after_changing_directory_is_denied(
         "ln -sf other.md docs/decisions.md",
         "awk -i inplace '{print}' docs/decisions.md",
         "node -e \"require('fs').writeFileSync('docs/decisions.md', '')\"",
+        "git log -1 --format='**Status:** x' --output=docs/decisions.md",
+        "git diff --output docs/decisions.md",
     ],
 )
 def test_other_writers_are_denied(command: str) -> None:

@@ -157,7 +157,8 @@ _EMAIL_SPAN = re.compile(r"<[^<>\s]+@[^<>\s]+>")
 # Write-shaped tokens for the Bash route: in-place editors, any redirect,
 # file movers/writers, inline interpreters, and the git subcommands that
 # rewrite a tracked file in place (`git checkout HEAD~3 -- <log>` reverts
-# a ratification as surely as an edit does). Conservative on purpose — a
+# a ratification as surely as an edit does), and git's `--output=<file>`,
+# which writes any text it is given a format for. Conservative on purpose — a
 # false deny costs a re-phrase; a false allow costs the invariant.
 # `-c` is matched as a combined short option too (`bash -lc`, `python3
 # -uc`) and in its separated form (`bash -l -c`): `-lc` is the standard
@@ -184,7 +185,7 @@ _BASH_WRITE_TOKENS = re.compile(
     r"|\b[gmn]?awk\b[^|;&]*\s(?:-i|--include)[\s=]*inplace"
     r"|\b(?:tee|mv|cp|dd|truncate|sponge|install|rsync|apply_patch)\b"
     r"|\b(?:ln|patch|ed|ex|vi|vim|nvim)\b"
-    r"|\bgit\b[^|;&]*\s(?:checkout|restore|apply|am|mv|rm|stash)\b"
+    r"|\bgit\b[^|;&]*\s(?:checkout|restore|apply|am|mv|rm|stash|--output)\b"
     r"|\bpython3?(?:\.\d+)?\b[^|;&]*\s-[A-Za-z]*c\b"
     r"|\b(?:node|ruby|perl)\b[^|;&]*\s-[A-Za-z]*e\b"
     r"|\b(?:sh|bash|zsh|dash|ksh|ash)\b" + _OPTS + r"\s+-[A-Za-z]*c\b"
