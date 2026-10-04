@@ -98,12 +98,12 @@ clients do and requires a deny. Change a hook only with its tests.
 
 ## Known limits
 
-- The decisions guard's Bash arm is best-effort: it sees a command that
-  spells `decisions.md` and carries a write-shaped token, and nothing that
-  hides the name (quoting tricks, globs, variables, symlinks, a script run
-  second). The edit tools — Write, Edit, apply_patch — are where it holds,
+- The decisions guard vets the edit tools only (Write, Edit, apply_patch),
   reading markers as they render; a status value spelled with look-alike
-  letters from another script is not recognised.
+  letters from another script is not recognised. Shell commands that write
+  the log are not vetted, by design: a Bash arm was removed because the
+  ways a shell can write a file are open-ended and chasing them was not
+  worth it. Code review catches undesired status changes.
 - Hooks read no project configuration and detect no project kind yet;
   that lands with the first hook that branches on one.
 - Two method rules — debugging, and design exploration — are held back

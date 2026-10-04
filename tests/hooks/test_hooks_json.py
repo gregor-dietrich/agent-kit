@@ -55,7 +55,6 @@ def test_the_guards_are_wired_to_the_tools_they_guard() -> None:
         ("SessionStart", "", "session-context.sh"),
         ("PreToolUse", "Bash", "pipe-status-guard.sh"),
         ("PreToolUse", "Bash", "tea-guard.sh"),
-        ("PreToolUse", "Bash", "decisions-status-guard.sh"),
         ("PreToolUse", "Write|Edit|apply_patch", "decisions_status_guard.py"),
     }
 
@@ -76,7 +75,6 @@ def _probe(matcher: str, script: str, root: Path) -> dict[str, Any]:
     command = {
         "pipe-status-guard.sh": "make test | tail -5",
         "tea-guard.sh": "tea issues 1",
-        "decisions-status-guard.sh": "echo x >> docs/decisions.md",
     }[script]
     return {
         "cwd": str(root),

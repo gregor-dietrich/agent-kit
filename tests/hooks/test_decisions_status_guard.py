@@ -1,10 +1,9 @@
 """Behavioral pin for the decisions-log status guard hook (``hooks/``).
 
-Runs the real hook — the bash prefilter wrapper plus the Python guard — as a
-subprocess with crafted tool JSON, covering the routes a review found around
-an earlier fragment-counting version: partial-marker Edits,
-compound edits whose global marker counts net to zero, secondary-checkout /
-worktree paths, and write-shaped Bash commands.
+Runs the real hook as a subprocess with crafted tool JSON, covering the
+routes a review found around an earlier fragment-counting version:
+partial-marker Edits, compound edits whose global marker counts net to
+zero, and secondary-checkout / worktree paths.
 
 These tests are load-bearing: a crashed PreToolUse hook fails OPEN in the
 harness (only exit 2 or an emitted deny payload blocks), so a broken guard
@@ -18,10 +17,6 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
-# hooks.json registers the bash prefilter for the Bash tool and the Python
-# guard itself for Write|Edit|apply_patch; each payload runs through the
-# one its tool reaches.
-_HOOK = _ROOT / "hooks" / "decisions-status-guard.sh"
 _GUARD = _ROOT / "hooks" / "decisions_status_guard.py"
 
 _DOC = (
@@ -35,9 +30,8 @@ _DOC = (
 
 
 def _run(payload: dict[str, object], cwd: Path | None = None) -> str:
-    bash = payload.get("tool_name") == "Bash"
     result = subprocess.run(
-        ["bash", str(_HOOK)] if bash else [str(_GUARD)],
+        [str(_GUARD)],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
@@ -59,22 +53,6 @@ def _decisions_file(tmp_path: Path, text: str = _DOC) -> Path:
     return doc
 
 
-@pytest.fixture(autouse=True)
-def _in_a_checkout_with_a_log(
-    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Run every hook from a checkout that keeps a decisions log.
-
-    A payload without ``cwd`` resolves against the hook process's own cwd,
-    and the Bash arm is a no-op in a checkout without a log — so the tests
-    that pin it need one to stand in.
-    """
-    root = tmp_path_factory.mktemp("checkout")
-    (root / ".git").mkdir()
-    _decisions_file(root)
-    monkeypatch.chdir(root)
-
-
 def _edit(path: Path, old: str, new: str) -> dict[str, object]:
     return {
         "tool_name": "Edit",
@@ -84,10 +62,6 @@ def _edit(path: Path, old: str, new: str) -> dict[str, object]:
             "new_string": new,
         },
     }
-
-
-def _bash(command: str) -> dict[str, object]:
-    return {"tool_name": "Bash", "tool_input": {"command": command}}
 
 
 def _patch_header(
@@ -310,7 +284,6 @@ def test_a_differently_cased_log_name_is_guarded(
     doc.parent.mkdir(parents=True)
     doc.write_text(_DOC, encoding="utf-8")
     assert _denied(_edit(doc, "**Status:** Proposed", "**Status:** Accepted"))
-    assert _denied(_bash(f"sed -i s/Proposed/Accepted/ docs/{name}"))
 
 
 def test_other_files_are_not_guarded(tmp_path: Path) -> None:
@@ -416,7 +389,6 @@ def test_unparseable_codex_decisions_patch_is_denied(tmp_path: Path) -> None:
     assert _denied(payload)
 
 
-
 # --- Codex apply_patch: simulated as Codex applies it ----------------------
 # Each semantic below was measured against Codex's own apply_patch: a first
 # hunk may omit its `@@` line, `@@ <line>` seeks forward to that line, hunks
@@ -499,42 +471,12 @@ def test_codex_appended_accepted_entry_is_denied(tmp_path: Path) -> None:
     assert _denied(_patch(tmp_path, body))
 
 
-# --- Bash: write-shaped commands are denied, reads pass ---------------------
+# --- a payload the guard cannot read ---------------------------------------
 
 
-def test_bash_in_place_edit_is_denied() -> None:
-    cmd = "sed -i s/Proposed/Accepted/ docs/decisions.md"
-    assert _denied(_bash(cmd))
-
-
-def test_bash_redirect_is_denied() -> None:
-    assert _denied(_bash("echo x >> docs/decisions.md"))
-
-
-def test_bash_read_is_allowed() -> None:
-    assert not _denied(_bash("grep -n Status docs/decisions.md"))
-
-
-def test_bash_git_add_is_allowed() -> None:
-    assert not _denied(_bash("git add docs/decisions.md && git commit"))
-
-
-def test_bash_commit_with_email_trailer_is_allowed() -> None:
-    # The trailer's <user@host> is not a redirect; without the email-span
-    # strip, every standard commit naming the file would be denied.
-    cmd = (
-        "git add docs/decisions.md && git commit -m 'docs: amend\n\n"
-        "Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>'"
-    )
-    assert not _denied(_bash(cmd))
-
-
-@pytest.mark.parametrize(
-    "argv", [["bash", str(_HOOK)], [str(_GUARD)]], ids=["bash-arm", "edit-arm"]
-)
-def test_malformed_payload_fails_open(argv: list[str]) -> None:
+def test_malformed_payload_fails_open() -> None:
     result = subprocess.run(
-        argv,
+        [str(_GUARD)],
         input="decisions.md but not json",
         capture_output=True,
         text=True,
@@ -634,87 +576,6 @@ def test_flip_in_a_hunk_with_a_blank_context_line_is_denied(
     assert _denied(payload)
 
 
-# --- Bash: apply_patch, wrapper shells, and argv-list commands -------------
-
-
-def test_bash_apply_patch_heredoc_is_denied() -> None:
-    # apply_patch is a first-class writer; run from a shell it bypassed the
-    # apply_patch route the guard vets.
-    cmd = (
-        'apply_patch <<"PATCH"\n'
-        "*** Begin Patch\n"
-        "*** Update File: docs/decisions.md\n"
-        "@@\n"
-        "-**Status:** Proposed\n"
-        "+**Status:** Accepted\n"
-        "*** End Patch\n"
-        "PATCH\n"
-    )
-    assert _denied(_bash(cmd))
-
-
-@pytest.mark.parametrize(
-    "cmd",
-    [
-        "bash -lc 'true docs/decisions.md'",
-        "sh -lc 'true docs/decisions.md'",
-        "zsh -ic 'true docs/decisions.md'",
-        "bash -l -c 'true docs/decisions.md'",
-        "python3 -uc 'print(1) docs/decisions.md'",
-    ],
-)
-def test_combined_short_option_interpreters_are_denied(cmd: str) -> None:
-    # `-lc` is the standard wrapper spelling an agent harness emits;
-    # requiring `-c` to be its own contiguous token defeated this whole arm.
-    assert _denied(_bash(cmd))
-
-
-def test_unrelated_dash_c_is_allowed() -> None:
-    # The interpreter arm stays anchored on the interpreter name: a `-c`
-    # belonging to some other tool is not a write.
-    assert not _denied(_bash("cat docs/decisions.md | grep -c Status"))
-
-
-@pytest.mark.parametrize(
-    "argv",
-    [
-        ["python3", "-c", "open('docs/decisions.md', 'w')"],
-        ["sed", "-i", "s/Proposed/Accepted/", "docs/decisions.md"],
-    ],
-)
-def test_argv_list_command_is_scanned(argv: list[str]) -> None:
-    # Codex's shell tool sends an argv list. `str()` on it yields a Python
-    # repr whose quoting and commas break every adjacency the write-token
-    # patterns rely on, so the guard read these as harmless.
-    payload: dict[str, object] = {
-        "tool_name": "Bash",
-        "tool_input": {"command": argv},
-    }
-    assert _denied(payload)
-
-
-def test_argv_wrapper_script_is_scanned_not_the_wrapper() -> None:
-    # `["bash", "-lc", <script>]` is harness plumbing: the script is the
-    # command, and it is what gets scanned.
-    payload: dict[str, object] = {
-        "tool_name": "Bash",
-        "tool_input": {
-            "command": ["bash", "-lc", "tee docs/decisions.md"],
-        },
-    }
-    assert _denied(payload)
-
-
-def test_argv_wrapper_around_a_read_is_allowed() -> None:
-    payload: dict[str, object] = {
-        "tool_name": "Bash",
-        "tool_input": {
-            "command": ["bash", "-lc", "grep -n Status docs/decisions.md"],
-        },
-    }
-    assert not _denied(payload)
-
-
 # --- status values: caught however they are cased or spaced ----------------
 
 
@@ -763,7 +624,6 @@ def test_lowercase_deratification_is_denied(tmp_path: Path) -> None:
     doc = _decisions_file(tmp_path)
     payload = _edit(doc, "**Status:** Accepted", "**Status:** Retired")
     assert _denied(payload)
-
 
 
 # --- status values: counted as they render ---------------------------------
@@ -851,26 +711,6 @@ def _bare_checkout(tmp_path: Path) -> Path:
     return root
 
 
-def test_bash_write_without_a_log_is_allowed(tmp_path: Path) -> None:
-    root = _bare_checkout(tmp_path)
-    payload = _bash("echo x >> docs/decisions.md")
-    payload["cwd"] = str(root)
-    assert not _denied(payload, cwd=root)
-
-
-def test_bash_write_from_a_subdirectory_of_a_logged_checkout_is_denied(
-    tmp_path: Path,
-) -> None:
-    # The log is looked up at the checkout root, not at the cwd.
-    _decisions_file(tmp_path)
-    (tmp_path / ".git").mkdir()
-    nested = tmp_path / "src" / "pkg"
-    nested.mkdir(parents=True)
-    payload = _bash("sed -i s/a/b/ ../../docs/decisions.md")
-    payload["cwd"] = str(nested)
-    assert _denied(payload, cwd=nested)
-
-
 def test_creating_a_log_with_an_accepted_entry_is_allowed(
     tmp_path: Path,
 ) -> None:
@@ -903,192 +743,7 @@ def test_codex_patch_adding_a_log_is_allowed(tmp_path: Path) -> None:
     assert not _denied(payload, cwd=root)
 
 
-# --- routes around the no-op and the lexical path test ----------------------
-
-
-def test_bash_write_by_absolute_path_from_a_bare_cwd_is_denied(
-    tmp_path: Path,
-) -> None:
-    # The cwd's checkout keeps no log, but the command names one that
-    # exists elsewhere: the no-op must not become the way around the guard.
-    doc = _decisions_file(tmp_path / "logged")
-    root = _bare_checkout(tmp_path)
-    payload = _bash(f"sed -i s/Proposed/Accepted/ {doc}")
-    payload["cwd"] = str(root)
-    assert _denied(payload, cwd=root)
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "cd ../logged && sed -i s/Proposed/Accepted/ docs/decisions.md",
-        "git -C ../logged checkout HEAD~1 -- docs/decisions.md",
-    ],
-)
-def test_bash_write_after_changing_directory_is_denied(
-    tmp_path: Path, command: str
-) -> None:
-    # Where the command ends up running cannot be resolved here, so its
-    # target is assumed to be a log rather than ruled out.
-    root = _bare_checkout(tmp_path)
-    payload = _bash(command)
-    payload["cwd"] = str(root)
-    assert _denied(payload, cwd=root)
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "git checkout HEAD~3 -- docs/decisions.md",
-        "git restore --source HEAD~3 docs/decisions.md",
-        "patch docs/decisions.md < x.diff",
-        "ln -sf other.md docs/decisions.md",
-        "awk -i inplace '{print}' docs/decisions.md",
-        "node -e \"require('fs').writeFileSync('docs/decisions.md', '')\"",
-        "git log -1 --format='**Status:** x' --output=docs/decisions.md",
-        "git diff --output docs/decisions.md",
-        "git archive -o docs/decisions.md HEAD",
-        "git reset --hard HEAD~3 && grep Status docs/decisions.md",
-        "git cherry-pick abc1234 && grep Status docs/decisions.md",
-        "git read-tree -u -m HEAD~3 && cat docs/decisions.md",
-        "git checkout-index -f docs/decisions.md",
-    ],
-)
-def test_other_writers_are_denied(command: str) -> None:
-    # Reverting the file to an older revision de-ratifies as surely as an
-    # edit; each of these rewrites it without passing through Edit/Write.
-    assert _denied(_bash(command))
-
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "sed --in-place s/a/b/ docs/decisions.md",
-        "sed --in-place=.bak s/a/b/ docs/decisions.md",
-        "gawk -i inplace '{print}' docs/decisions.md",
-        "vim -es -c '%s/a/b/' -c wq docs/decisions.md",
-        "python3 - <<'EOF'\nopen('docs/decisions.md', 'w')\nEOF",
-        "node <<'EOF'\n"
-        "require('fs').writeFileSync('docs/decisions.md', '')\nEOF",
-        "echo \"open('docs/decisions.md', 'w')\" | python3",
-        "eval \"$(cat <<'EOF'\nsed -i s/a/b/ docs/decisions.md\nEOF\n)\"",
-    ],
-)
-def test_writers_the_token_list_missed_are_denied(command: str) -> None:
-    assert _denied(_bash(command))
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "grep -n Status docs/decisions.md 2>/dev/null",
-        "grep -q Status docs/decisions.md >/dev/null 2>&1",
-        "git add docs/decisions.md && git commit -F - <<'EOF'\n"
-        "Proposed -> reviewed in docs/decisions.md\nEOF",
-        "python3 tools/lint.py < docs/decisions.md",
-        "git commit -m \"$(cat <<'EOF'\n"
-        "Proposed -> reviewed in docs/decisions.md\nEOF\n)\"",
-        "git tag -a v1 --file=- <<'EOF'\n"
-        "Proposed -> reviewed in docs/decisions.md\nEOF",
-        "git add docs/decisions.md && git commit -m \"$(cat <<'EOF'\n"
-        "Proposed -> reviewed in docs/decisions.md\nEOF\n)\" && git status",
-    ],
-)
-def test_reads_with_benign_redirects_or_prose_are_allowed(
-    command: str,
-) -> None:
-    assert not _denied(_bash(command))
-
-
-_SED = "sed -i s/a/b/ docs/decisions.md"
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        # A quoted or commented `<<` opens no heredoc: the next line runs.
-        f'echo "<<X"\n{_SED}',
-        f"# <<X\n{_SED}",
-        # No terminator line: what the body is cannot be told.
-        f"cat <<X\n{_SED}",
-        # Readers that run a script read from stdin.
-        "awk -f - /dev/null <<'EOF'\n"
-        'BEGIN{print "x" > "docs/decisions.md"}\nEOF',
-        "sed -n -f - x <<EOF\nw docs/decisions.md\nEOF",
-        "printf 'w docs/decisions.md' | sed -n -f /dev/stdin x",
-        # A substitution's output run as a command, at once or later.
-        f"$(cat <<'EOF'\n{_SED}\nEOF\n)",
-        f"sudo $(cat <<'EOF'\n{_SED}\nEOF\n)",
-        f"M=\"$(cat <<'EOF'\n{_SED}\nEOF\n)\"; $M",
-        f"M=\"$(cat <<'EOF'\n{_SED}\nEOF\n)\"; if true; then $M; fi",
-        # Commands that run their argument: only git's message is prose.
-        f"watch \"$(cat <<'EOF'\n{_SED}\nEOF\n)\"",
-        f"su -c \"$(cat <<'EOF'\n{_SED}\nEOF\n)\"",
-        # An unquoted delimiter expands the body before git reads it.
-        f"git commit --allow-empty -F - <<EOF\n$({_SED})\nEOF",
-        f"git commit -m \"$(cat <<EOF\n$({_SED})\nEOF\n)\"",
-        # A `git` that is not git, or a message run once git holds it.
-        f"git() {{ $2; }}; git commit \"$(cat <<'EOF'\n{_SED}\nEOF\n)\"",
-        f"PATH=/tmp/x:$PATH; git commit -F - <<'EOF'\n{_SED}\nEOF",
-        f"git commit -F - <<'EOF'\n{_SED}\nEOF\n"
-        "if true; then $(git log -1 --format=%B); fi",
-        f"git commit -F - <<'EOF'\n{_SED}\nEOF\nX=1 $(git log -1 --format=%B)",
-        f"git commit -F - <<'EOF'\n{_SED}\nEOF\nenv $(git log -1 --format=%B)",
-        f"git commit -F - <<'EOF'\n{_SED}\nEOF\n"
-        'watch "$(git log -1 --format=%B)"',
-        f"git commit -F - <<'EOF'\n{_SED}\nEOF\n"
-        "git log -1 --format=%B | parallel",
-        f"git commit -F - <<'EOF'\n{_SED}\nEOF\n"
-        "git -c core.pager=sh log -p -1 --format=%B",
-        # A `#` comment ends at its line; the next one still runs.
-        f"git commit -F - <<'EOF' # x\n{_SED}\nEOF\n"
-        'eval "$(git log -1 --format=%B)"',
-        # `git push --receive-pack` runs its value as a command.
-        "git commit -F - <<'EOF' && git push "
-        f"--receive-pack='git log -1 --format=%B | sh #' . HEAD:x\n{_SED}\nEOF",
-    ],
-)
-def test_heredoc_bodies_a_shell_may_run_are_scanned(command: str) -> None:
-    assert _denied(_bash(command))
-
-
-@pytest.mark.parametrize(
-    "command",
-    ["echo x >&1/docs/decisions.md", "echo x >/dev/null.md docs/decisions.md"],
-)
-def test_a_redirect_that_only_starts_benign_is_denied(command: str) -> None:
-    # `>&1/…` opens a file, not a descriptor; `/dev/null.md` is not
-    # /dev/null. Only the whole shell word makes a redirect benign.
-    assert _denied(_bash(command))
-
-
-def test_a_log_path_after_a_quoted_heredoc_opener_is_reached(
-    tmp_path: Path,
-) -> None:
-    # Reading `<<X` in quotes as a heredoc hid the line naming the log.
-    doc = _decisions_file(tmp_path / "my repo")
-    payload = _bash(f'echo "<<X"\nsed -i s/a/b/ "{doc}"')
-    payload["cwd"] = str(_bare_checkout(tmp_path))
-    assert _denied(payload, cwd=tmp_path)
-
-
-@pytest.mark.parametrize("quote", ['"{}"', "{}"])
-def test_bash_write_to_a_log_path_with_a_space_is_denied(
-    tmp_path: Path, quote: str
-) -> None:
-    root = tmp_path / "my repo"
-    doc = _decisions_file(root)
-    escaped = str(doc).replace(" ", "\\ ")
-    spelled = str(doc) if quote.startswith('"') else escaped
-    payload = _bash(f"sed -i s/a/b/ {quote.format(spelled)}")
-    payload["cwd"] = str(_bare_checkout(tmp_path))
-    assert _denied(payload, cwd=tmp_path)
-
-
-def test_git_reads_of_the_log_are_allowed() -> None:
-    assert not _denied(_bash("git log -p docs/decisions.md"))
-    assert not _denied(_bash("git diff HEAD~1 -- docs/decisions.md"))
+# --- the lexical path test --------------------------------------------------
 
 
 def test_an_edit_through_a_symlink_is_vetted(tmp_path: Path) -> None:
@@ -1101,14 +756,3 @@ def test_an_edit_through_a_symlink_is_vetted(tmp_path: Path) -> None:
     assert _denied(payload)
 
 
-def test_bash_write_through_an_env_var_path_is_denied(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # `"$HOME/…/docs/decisions.md"` names a log only once the variable is
-    # expanded; unexpanded, it resolved to nothing and passed as a no-op.
-    _decisions_file(tmp_path / "logged")
-    monkeypatch.setenv("LOGGED_ROOT", str(tmp_path / "logged"))
-    root = _bare_checkout(tmp_path)
-    payload = _bash('sed -i s/a/b/ "$LOGGED_ROOT/docs/decisions.md"')
-    payload["cwd"] = str(root)
-    assert _denied(payload, cwd=root)

@@ -111,7 +111,7 @@ def strip_heredocs(text: str) -> str:
     return "\n".join(out)
 
 
-def tokenize_lines(text: str, heredocs: bool = False) -> Iterator[list[str]]:
+def tokenize_lines(text: str) -> Iterator[list[str]]:
     """Yield each line of heredoc-stripped *text* as a shell token list.
 
     Line by line, because shlex treats a newline as ordinary *whitespace*: a
@@ -120,10 +120,9 @@ def tokenize_lines(text: str, heredocs: bool = False) -> Iterator[list[str]]:
     IS a command separator in shell. A line that does not tokenize
     (unbalanced quotes, a quoted string spanning lines) is skipped, never
     blocked. ``punctuation_chars`` emits ``|``, ``&&``, ``;`` and friends as
-    standalone tokens. ``heredocs=True`` keeps the bodies, for a caller that
-    must not lose a line to a ``<<`` the stripper misreads (one in quotes).
+    standalone tokens.
     """
-    for line in (text if heredocs else strip_heredocs(text)).split("\n"):
+    for line in strip_heredocs(text).split("\n"):
         if not line.strip():
             continue
         try:

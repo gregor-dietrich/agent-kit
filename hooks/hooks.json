@@ -24,11 +24,6 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/tea-guard.sh\"",
             "timeout": 5
-          },
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/decisions-status-guard.sh\"",
-            "timeout": 5
           }
         ]
       },

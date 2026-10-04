@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse guard (Write|Edit|apply_patch|Bash): Status is the author's.
+"""PreToolUse guard (Write|Edit|apply_patch): Status is the author's.
 
 A decisions log (docs/decisions.md) marks each ``## ADR-NNNN`` entry
 **Status:** Accepted | Proposed | retired. Accepted carries real force: a
@@ -32,50 +32,23 @@ exact spelling is a job for the project's own format check, not this hook.
 Markers are counted both in the text as written and as it renders (HTML
 comments and tags, entities, invisible format characters, compatibility
 forms and markup around the value resolved), and a blocked move in either
-view is denied. A value spelled with look-alike
-letters from another script is not recognised — a stated limit, like the
-Bash arm's below.
-
-The Bash tool cannot be vetted the same way, so any command that mentions
-decisions.md AND carries a write-shaped token (in-place editors, redirects,
-tee/mv/cp/apply_patch, git checkout/restore, inline interpreters and ones
-reading a script from stdin) is denied with a pointer to Edit/Write; plain
-reads (grep/cat/git log, redirects to /dev/null) pass. A heredoc body is
-left out of the scan only when the shell would read it as one and nothing
-can run it: every ``<<`` in the command is a real operator with a quoted
-delimiter (an unquoted one expands ``$(…)`` in the body) and its
-terminator line, each is read by ``git commit``/``git tag`` with ``-F -``
-or ``--file=-``, or by a bare ``cat`` in a quoted ``"$(…)"`` passed to
-``git commit``/``git tag``, and the rest is nothing but plain ``git
-add|commit|tag|status`` commands joined by ``&&``, ``||``, ``;`` or
-newlines, with no expansion, pipe or other redirect. Guessing what else
-could re-read and run a message was tried and never converged. So a
-commit message is not read as a command, and everything else is scanned
-whole.
-An argv-list ``command`` is scanned like a string one, and a ``bash -lc
-<script>`` wrapper is unwrapped to the script it runs.
-
-That arm is best-effort by design, and its limits are stated rather than
-chased: a command that never spells the name (``decisions.m''d``, a glob,
-a variable, a symlink with another name, a script file written first and
-run second) is not seen by a substring-and-token test, and no such test
-can see all of them. The guard is a guardrail against an agent ratifying
-its own draft in the ordinary course of work, not a sandbox. The edit
-tools are where it holds exactly: Write, Edit and apply_patch payloads
-reach the Python guard unfiltered and are judged on the resolved path.
+view is denied. A value spelled with look-alike letters from another
+script is not recognised — a stated limit.
 
 A no-op in a repository that keeps no decisions log: an edit is vetted only
-when the file it targets already exists, and a Bash command only when it
-could reach one — the checkout it runs in (found by walking up from the
-payload's cwd to the directory holding ``.git``) has a docs/decisions.md,
-a log-shaped path it names exists, or it changes directory first, which
-leaves its target unknowable here. The guarded path is matched lexically
-and after resolving symlinks.
+when the file it targets already exists. The guarded path is matched
+lexically and after resolving symlinks.
 
-Scope, honestly: this constrains Claude Code and Codex tool calls only, in
-whatever checkout they target (the path test is a suffix match, so worktrees
-and secondary checkouts are covered). It is a guardrail on those clients, not
-a repo invariant; ``git log -p docs/decisions.md`` remains the audit trail.
+Scope, honestly: this constrains the Claude Code and Codex edit tools only,
+in whatever checkout they target (the path test is a suffix match, so
+worktrees and secondary checkouts are covered). A shell command that writes
+the file is deliberately not vetted. A Bash arm that tried was removed on
+purpose: the ways a shell can write a file are open-ended, every review
+round found more, and the cost was out of proportion to what it protects.
+Undesired status changes are caught in code review. Do not reintroduce
+it. The guard catches an agent ratifying its own draft in the ordinary
+course of editing, not one set on getting around it.
+``git log -p docs/decisions.md`` remains the audit trail.
 Deliberately NOT paired with a pre-commit ban on committing a Proposed entry
 — committing a draft is legitimate, and blocking it would pressure a
 premature flip to Accepted, manufacturing the rubber-stamp the rule exists
@@ -93,7 +66,6 @@ the wire-format plumbing is shared across hooks via hook_lib.py.
 import html
 import os
 import re
-import shlex
 import sys
 import unicodedata
 from collections.abc import Iterator
@@ -109,9 +81,7 @@ from hook_lib import (
     command_text,
     deny,
     is_guarded_suffix,
-    payload_cwd,
     read_payload,
-    tokenize_lines,
     tool_input,
 )
 
@@ -148,63 +118,6 @@ _UNRENDERED = re.compile(
 )
 
 _HEADING = re.compile(r"^## (ADR-\d+)", re.MULTILINE)
-
-# An email in angle brackets (a commit trailer's <user@host>) is not a
-# redirect — stripped before the token scan, or every `git commit` carrying
-# the standard Co-Authored-By trailer would read as write-shaped.
-_EMAIL_SPAN = re.compile(r"<[^<>\s]+@[^<>\s]+>")
-
-# Write-shaped tokens for the Bash route: in-place editors, any redirect,
-# file movers/writers, inline interpreters, and the git subcommands that
-# rewrite a tracked file in place (`git checkout HEAD~3 -- <log>` reverts
-# a ratification as surely as an edit does; so do reset, merge, pull and
-# the rest of their kind), and git's `--output=<file>` and `archive -o`,
-# which write any text they are given. Conservative on purpose — a
-# false deny costs a re-phrase; a false allow costs the invariant.
-# `-c` is matched as a combined short option too (`bash -lc`, `python3
-# -uc`) and in its separated form (`bash -l -c`): `-lc` is the standard
-# wrapper spelling an agent harness emits, and requiring `-c` to be its
-# own contiguous token defeated the whole arm against real payloads.
-# Between the interpreter name and the flag only further option words
-# are allowed, so an unrelated `-c` later in a long command still does
-# not match. `apply_patch` is a first-class writer and belongs here for
-# the same reason `tee`/`mv` do — Codex spells it as argv[0] of a shell
-# call.
-# An interpreter also runs a script it reads from stdin: one passed as `-`
-# or /dev/stdin, a heredoc or here-string, or a pipe into an interpreter
-# given no script argument (`python3 x.py < log` reads the log as data and
-# is not matched). awk and sed count: `print > f` and sed's `w f` write.
-_OPTS = r"(?:\s+-[A-Za-z]+)*"
-_INTERPRETERS = (
-    r"\b(?:python3?(?:\.\d+)?|node|ruby|perl|sh|bash|zsh|dash|ksh|ash"
-    r"|[gmn]?awk|sed)\b"
-)
-_BASH_WRITE_TOKENS = re.compile(
-    r"(?:\bsed\b[^|;&]*\s(?:-[A-Za-z]*i|--in-place)"
-    r"|\bperl\b[^|;&]*\s-[A-Za-z]*i"
-    r"|>"
-    r"|\b[gmn]?awk\b[^|;&]*\s(?:-i|--include)[\s=]*inplace"
-    r"|\b(?:tee|mv|cp|dd|truncate|sponge|install|rsync|apply_patch)\b"
-    r"|\b(?:ln|patch|ed|ex|vi|vim|nvim)\b"
-    r"|\bgit\b[^|;&]*\s(?:checkout|restore|apply|am|mv|rm|stash|reset"
-    r"|switch|merge|cherry-pick|revert|pull|rebase|read-tree|archive"
-    r"|--output)\b"
-    r"|\bpython3?(?:\.\d+)?\b[^|;&]*\s-[A-Za-z]*c\b"
-    r"|\b(?:node|ruby|perl)\b[^|;&]*\s-[A-Za-z]*e\b"
-    r"|\b(?:sh|bash|zsh|dash|ksh|ash)\b" + _OPTS + r"\s+-[A-Za-z]*c\b"
-    r"|" + _INTERPRETERS + r"[^|;&]*(?:\s(?:-|/dev/stdin)(?=\s|$)|<<)"
-    r"|\|\s*" + _INTERPRETERS + _OPTS + r"[ \t]*(?:$|[\n|;&)]))"
-)
-
-# Redirects that cannot write the log: to /dev/null, or duplicating a file
-# descriptor. Counting them as writes denied `grep … 2>/dev/null`. Only as
-# a whole shell word: `>&1/x` opens a file, and /dev/null.md is not null.
-_BENIGN_REDIRECT = re.compile(
-    r"(?:(?:\d*|&)>>?\s*/dev/null|\d*>&(?:\d+|-))(?=[\s;&|)]|$)"
-)
-
-# A heredoc operator and its delimiter: a name, optionally quoted.
-_HEREDOC_OP = re.compile(r"<<(-?)[ \t]*(['\"]?)([A-Za-z_][\w-]*)\2")
 
 GUARDED = "docs/decisions.md"
 
@@ -285,16 +198,6 @@ def _vet_view(before: str, after: str) -> None:
 # endings need no such step: read_text already reads CRLF as LF.
 _QUOTES = str.maketrans("\u2018\u2019\u201c\u201d", "''\"\"")
 
-# Words after which the command no longer runs where the payload's cwd
-# says: the log it reaches cannot be located from here, so its presence is
-# assumed rather than ruled out.
-_RELOCATES = re.compile(
-    r"\b(?:cd|pushd)\b|\bgit\b[^|;&]*\s(?:-C|--git-dir|--work-tree)\b"
-)
-# A path-shaped word naming the log, as a shell command spells it, and the
-# same inside one shell word, where a quoted or escaped space is part of it.
-_LOG_WORD = re.compile(r"[^\s'\"<>|;&()=]*decisions\.md", re.IGNORECASE)
-_LOG_IN_WORD = re.compile(r"[^'\"<>|;&()=]*decisions\.md", re.IGNORECASE)
 
 
 def _is_guarded(path: str) -> bool:
@@ -309,233 +212,6 @@ def _is_guarded(path: str) -> bool:
         is_guarded_suffix(p.lower(), GUARDED)
         for p in (path, os.path.realpath(path))
     )
-
-
-def _command_may_reach_log(payload: dict[str, Any], command: str) -> bool:
-    """Whether a shell command could touch an existing decisions log.
-
-    False only when nothing it names can be one: the cwd's checkout keeps
-    no log, every log-shaped word it names resolves to no existing log, and
-    it does not move elsewhere first. Anything this cannot see past counts
-    as reaching one — the no-op is for repositories without a log, never a
-    way around the guard in one that has one.
-    """
-    if _checkout_has_log(payload) or _RELOCATES.search(command):
-        return True
-    words = set(_LOG_WORD.findall(command))
-    for tokens in tokenize_lines(command, heredocs=True):
-        words.update(w for tok in tokens for w in _LOG_IN_WORD.findall(tok))
-    for word in words:
-        expanded = os.path.expandvars(os.path.expanduser(word))
-        path = absolute_path(payload, expanded)
-        if path.is_file() and _is_guarded(str(path)):
-            return True
-    return False
-
-
-@dataclass
-class _Heredoc:
-    strip_tabs: bool
-    delim: str
-    quoted: bool  # a quoted delimiter: the body is not expanded
-    reader: str = ""  # the simple command the operator belongs to
-    consumer: str | None = None  # the one a `"$(…)"` around it feeds
-    body: tuple[int, int] = (0, 0)  # through the terminator line
-
-
-@dataclass
-class _Context:
-    quoted: bool  # inside "…"; otherwise the top level, `(…)` or `$(…)`
-    start: int  # where the current simple command begins
-    outer: "_Context | None" = None  # whose argument a `"$(…)"` is
-    docs: list[_Heredoc] = field(default_factory=list)
-    fed: list[_Heredoc] = field(default_factory=list)  # docs in that "$(…)"
-
-
-def _heredocs(command: str) -> list[_Heredoc] | None:
-    """The heredocs *command* opens, as bash reads it; None when unsure.
-
-    A ``<<`` inside quotes or a comment opens none. Unsure is a backquote,
-    an unbalanced quote or paren, a delimiter that is not a plain name, or
-    a missing terminator line — the caller then scans the whole command.
-    """
-    docs: list[_Heredoc] = []
-    pending: list[_Heredoc] = []
-    stack = [_Context(False, 0)]
-
-    def end_command(ctx: _Context, at: int) -> None:
-        text = command[ctx.start : at]
-        for doc in ctx.docs:
-            doc.reader = text
-        for doc in ctx.fed:
-            doc.consumer = text
-        ctx.docs, ctx.fed, ctx.start = [], [], at + 1
-
-    i, n = 0, len(command)
-    while i < n:
-        c, ctx = command[i], stack[-1]
-        if c == "`":
-            return None
-        if c == "\\":
-            i += 2
-            continue
-        if command.startswith("$(", i):
-            outer = stack[-2] if ctx.quoted else None
-            stack.append(_Context(False, i + 2, outer))
-            i += 2
-            continue
-        if ctx.quoted:
-            if c == '"':
-                stack.pop()
-            i += 1
-            continue
-        if c == "'":
-            i = command.find("'", i + 1)
-            if i < 0:
-                return None
-        elif c == '"':
-            stack.append(_Context(True, i))
-        elif c == "#" and (i == 0 or command[i - 1] in " \t\n;&|()"):
-            i = command.find("\n", i)
-            if i < 0:
-                break
-            continue
-        elif c == "(":
-            stack.append(_Context(False, i + 1))
-        elif c == ")":
-            if len(stack) == 1:
-                return None
-            end_command(stack.pop(), i)
-        elif command.startswith("<<<", i):
-            i += 2
-        elif command.startswith("<<", i):
-            if not (m := _HEREDOC_OP.match(command, i)):
-                return None
-            doc = _Heredoc(m[1] == "-", m[3], bool(m[2]))
-            docs.append(doc)
-            ctx.docs.append(doc)
-            if ctx.outer:
-                ctx.outer.fed.append(doc)
-            pending.append(doc)
-            i = m.end()
-            continue
-        elif c in ";&|":
-            end_command(ctx, i)
-        elif c == "\n":
-            end_command(ctx, i)
-            for doc in pending:
-                start, line = i + 1, None
-                while line != doc.delim:
-                    if i >= n:
-                        return None
-                    nl = command.find("\n", i + 1)
-                    end = n if nl < 0 else nl
-                    line = command[i + 1 : end]
-                    line = line.lstrip("\t") if doc.strip_tabs else line
-                    i = end
-                doc.body = (start, i)
-            if pending:
-                pending = []
-                continue
-        i += 1
-    if len(stack) > 1 or pending:
-        return None
-    end_command(stack[0], n)
-    return docs
-
-
-_GIT_MESSAGE = (["git", "commit"], ["git", "tag"])
-
-
-def _words(text: str) -> list[str]:
-    """*text*'s shell words, heredoc operators dropped; [] if unbalanced."""
-    try:
-        return shlex.split(_HEREDOC_OP.sub(" ", text))
-    except ValueError:
-        return []
-
-
-def _reads_prose(doc: _Heredoc) -> bool:
-    """Whether *doc*'s body only ever becomes a git commit or tag message.
-
-    Judged on who consumes it, never on what might run it: a list of
-    commands that execute text (`watch`, `su -c`, …) is never complete.
-    """
-    words = _words(doc.reader) if doc.quoted else []
-    if words[:2] in _GIT_MESSAGE:
-        return "--file=-" in words or ("-F", "-") in zip(words, words[1:])
-    return words == ["cat"] and _words(doc.consumer or "")[:2] in _GIT_MESSAGE
-
-
-# What may share a command line with a dropped body: git subcommands that
-# run no text, spelled without `-c`, an env prefix or anything else that
-# could make `git` something other than git or re-read the message. Not
-# `push`: its `--receive-pack`/`--exec` value is run as a command.
-_GIT_ONLY = {"add", "commit", "tag", "status"}
-# A `"$(cat <<'EOF' … EOF)"` message once its body is cut: only a heredoc
-# this guard parsed and dropped leaves that shape.
-_CUT_MESSAGE = re.compile(r"\$\(cat <<-?(['\"])[A-Za-z_][\w-]*\1\n\n\s*\)")
-_SEPARATORS = {"&&", "||", ";"}
-
-
-def _git_only(text: str) -> bool:
-    """Whether *text* is nothing but plain git commands, as `_GIT_ONLY`.
-
-    A token holding ``$`` or a backquote, or an operator other than a
-    separator and ``<<`` (a pipe, ``&``, a redirect, a paren), fails it.
-    """
-    commands: list[list[str]] = []
-    for line in _CUT_MESSAGE.sub("MSG", text).split("\n"):
-        # Line by line, with no comments: shlex's `#` runs to the end of
-        # its input, and hid every later line that bash still runs.
-        lex = shlex.shlex(line, posix=True, punctuation_chars=True)
-        lex.whitespace_split, lex.commenters = True, ""
-        commands.append([])
-        try:
-            for tok in lex:
-                if tok in _SEPARATORS:
-                    commands.append([])
-                elif tok != "<<":
-                    commands[-1].append(tok)
-        except ValueError:
-            return False
-    return all(
-        len(cmd) > 1
-        and cmd[0] == "git"
-        and cmd[1] in _GIT_ONLY
-        and not any("$" in t or "`" in t or not t.strip("();<>|&") for t in cmd)
-        for cmd in commands
-        if cmd
-    )
-
-
-def _write_scan_text(command: str) -> str:
-    """The part of *command* whose tokens can make it a write.
-
-    Heredoc bodies leave it only on the terms the module docstring states;
-    otherwise the whole command is scanned.
-    """
-    text, docs = command, _heredocs(command)
-    if docs and all(map(_reads_prose, docs)):
-        stripped = command
-        for doc in reversed(docs):
-            stripped = stripped[: doc.body[0]] + stripped[doc.body[1] :]
-        text = stripped if _git_only(stripped) else command
-    return _EMAIL_SPAN.sub("", _BENIGN_REDIRECT.sub("", text))
-
-
-def _checkout_has_log(payload: dict[str, Any]) -> bool:
-    """Whether the checkout the payload's cwd sits in keeps a decisions log.
-
-    Walks up to the directory holding ``.git`` (a file in a worktree, a
-    directory otherwise) and looks for the log there. With no ``.git`` on
-    the way up, the cwd itself is the only candidate root.
-    """
-    cwd = payload_cwd(payload)
-    for root in (cwd, *cwd.parents):
-        if (root / ".git").exists():
-            return (root / GUARDED).is_file()
-    return (cwd / GUARDED).is_file()
 
 
 def _sections(command: str) -> Iterator[tuple[str, str, str]]:
@@ -714,23 +390,6 @@ def main() -> None:
     data = read_payload()
     tool = str(data.get("tool_name", "") or "")
     ti = tool_input(data)
-
-    if tool == "Bash":
-        command = command_text(ti)
-        if (
-            "decisions.md" in command.lower()
-            and _BASH_WRITE_TOKENS.search(_write_scan_text(command))
-            and _command_may_reach_log(data, command)
-        ):
-            deny(
-                "Refused: this shell command looks like it writes "
-                "docs/decisions.md, which would bypass the ADR status "
-                "guard. Make the change through the Edit/Write tools so "
-                "the guard can vet it; for pure reads, drop the "
-                "write-shaped tokens (redirects, -i, tee/mv/cp, inline "
-                "interpreters) from the command."
-            )
-        sys.exit(0)
 
     if tool == "apply_patch":
         command = command_text(ti)
