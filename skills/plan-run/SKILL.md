@@ -205,12 +205,12 @@ zero that says nothing implies the question never came up.
 Stop and hand back rather than deciding, when:
 
 - **a design question surfaces mid-run** — the plan was less closed than
-  it looked. Put the choice in visible end-of-turn text or a question, and
-  do not settle it in flight because the implementation is already moving;
-- **three fixes have failed** — stop. That is a structural problem wearing
-  bad hypotheses as a disguise, not a run of bad luck: check the decisions
-  log, if the project keeps one, for a failed premise, and raise the
-  architectural question with the operator;
+  it looked. Put it as the `agent-kit:design-exploration` skill's
+  "Presenting, and who decides" requires, and do not settle it in flight
+  because the implementation is already moving;
+- **three fixes have failed** — stop, and do what the `agent-kit:debugging`
+  skill's "Three failed fixes means the design is wrong" requires before a
+  fourth;
 - **the plan's ground has moved** far enough that Stage 0 cannot confirm
   it still holds.
 

@@ -36,6 +36,7 @@ setup that grows the way the original did.**
 | `hooks/session-context.md` | The four delegation rules that hold on every dispatch, injected at session start | Any repository |
 | `skills/delegation` | Pinned-dispatch policy, the judgment threshold, cost reports | Any repository |
 | `skills/review-triage` | Context gathering, recording, `novel`/`instance` marks, finding destinations | Any repository; release bar comes from the project's decisions log |
+| `skills/debugging`, `skills/design-exploration` | Method: no fix without a root cause; two or three options and the operator's choice for a real design decision | Any repository; boundaries and gates come from the project's `AGENTS.md`. |
 | `skills/plan-create`, `skills/plan-run` | Decision → closed spec → pinned dispatches → PR | Any repository; gates and PR conventions come from the project's `AGENTS.md` |
 | `skills/ai-review` | Multi-agent review with pinned agents, stance-split verification and no finding cap | Any repository; risk paths can be named in the project's `AGENTS.md` |
 | `agents/*` | scout, code-reviewer, software-architect, backend-developer, frontend-developer | Claude Code only; each reads the project's own docs before acting |
@@ -110,9 +111,6 @@ clients do and requires a deny. Change a hook only with its tests.
   review catches undesired status changes.
 - Hooks read no project configuration and detect no project kind yet;
   that lands with the first hook that branches on one.
-- Two method rules — debugging, and design exploration — are held back
-  until the repository's licence is settled, because they adapt
-  MIT-licensed material whose notice must travel with them.
 
 ## Developing
 

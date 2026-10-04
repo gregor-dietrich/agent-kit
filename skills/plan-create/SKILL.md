@@ -53,14 +53,12 @@ through unpinned vehicles.
 ## When this skill applies
 
 When the work carries **a decision with more than one defensible answer**
-— and only then. It does not run for a closed spec, a bug fix whose cause
-is established and whose remedy is local, a rename, or a doc fix.
+— and only then. The `agent-kit:design-exploration` skill, "When this
+binds", owns that test and what falls outside it; this skill runs that
+skill's method through pinned dispatches.
 
 If you cannot name the decision being made, there is no plan to write: say
-so and hand straight to `/agent-kit:plan-run` (or just build the thing). A
-plan produced for work that needed none spends the reader's attention for
-nothing — the cost the `agent-kit:review-triage` skill prices in "Asking
-has a cost too".
+so and hand straight to `/agent-kit:plan-run` (or just build the thing).
 
 ## Stage plan
 
@@ -77,16 +75,14 @@ Gather in the main loop what Stage 1 and 2 prompts must carry:
   single-issue read: every other view silently omits comments, and the tea
   guard denies a read without the flag;
 - the project's decisions log, if it keeps one (`docs/decisions.md`) —
-  **always**. An **Accepted** entry closes its question and a design
-  contradicting one is dead on arrival; a `**Status:** Proposed` entry is
-  a draft and carries no such force; an entry with a `**Premise:**` is
-  closed only while that premise holds;
+  **always**, read as the `agent-kit:design-exploration` skill's "Before
+  proposing anything" says, since it changes what is even proposable;
 - the project's `AGENTS.md` (or `CLAUDE.md`), any nested one for the area
   the work touches, and the scoped rule files that apply to it.
 
-**Size the scope here.** If the request spans several independent
-subsystems, say so now and propose a decomposition rather than designing
-all of it at once — each piece then gets its own cycle.
+**Size the scope here**, per that same section: a request spanning
+several independent subsystems gets a proposed decomposition now, not one
+design for all of it.
 
 ### Stage 1 — Context fan-out (`agent-kit:scout`)
 
@@ -101,26 +97,18 @@ say that in Stage 5 rather than dispatching to look busy.
 
 ### Stage 2 — Design options (`agent-kit:software-architect`)
 
-Ask for **two or three** approaches, not one and not seven — one approach
-presented alone is a decision already made and dressed as a question —
-with a recommendation among them.
+Ask for **two or three** approaches with a recommendation among them, as
+the `agent-kit:design-exploration` skill's "Proposing" sets out.
 
 Either one dispatch asked for two or three approaches, or (for a decision
 worth the spend) one dispatch per approach from a stated angle, judged
 against each other in the main loop. Say which shape you chose and why.
 
 Every prompt MUST carry the Stage 0 material, the Stage 1 returns, and
-these constraints, which bind every option **before** it is offered:
-
-- **YAGNI** — build what this change needs; extract shared code when a
-  second consumer lands, never speculatively;
-- **design for isolation** — each unit has one purpose, a stated
-  interface, and can be tested alone;
-- **follow the existing pattern** — what the codebase already does wins
-  over what a fresh design would prefer, unless changing that pattern is
-  the point;
-- **the project's stated priority ordering**, if it states one, as a
-  tie-breaker only — between options that already pass the rest.
+that section's constraints, copied in full — YAGNI, design for isolation,
+follow what is already here, and the project's priority ordering as a
+tie-breaker only. They bind every option **before** it is offered, and
+the agent cannot load the skill itself.
 
 `agent-kit:software-architect` cannot fetch, so give it the tracker
 material as **files**, not as a summary: write the issue body and its full
@@ -131,33 +119,23 @@ cannot go and check itself.
 
 ### Stage 3 — The decision (main loop; it is the operator's)
 
-Present the options in sections scaled to their difficulty, covering the
-parts that carry risk: boundaries, data flow, failure handling, testing.
-Lead with the one you recommend and say why. Give each option the
-trade-off that actually distinguishes it, not a symmetric paragraph.
-
-**The choice MUST be put where it can be answered — visible end-of-turn
-text, or a question.** A design recorded only in a plan file, a PR
-description, an issue comment or a commit message _records_ a decision
-instead of asking for one. Do not report the run as complete while the
-choice is open, and do not write the plan file until it is made: a plan
-file is the record of a decision, never a substitute for asking.
+Present the options as the `agent-kit:design-exploration` skill's
+"Presenting, and who decides" requires. **The choice MUST be put where it
+can be answered — visible end-of-turn text, or a question.** A plan file
+is one more place that only _records_ a decision: do not report the run
+as complete while the choice is open, and do not write the plan file
+until it is made.
 
 ### Stage 4 — Write the plan
 
 Only after Stage 3 is answered. See "The plan file" below.
 
-Then self-review it once with fresh eyes and fix inline: any placeholder
-or TBD, any two sections that contradict each other, any requirement
-admitting two readings, and any scope that has quietly grown past one
-implementation.
-
-If the project keeps a decisions log and the decision is load-bearing — it
-constrains future work, or a later reader would relitigate it — draft it
-there in the log's shape (a **Premise**, and a **Guard** naming what
-notices when the premise fails) with `**Status:** Proposed`. You MUST NOT
-mark it `**Status:** Accepted`: ratification is the operator's act alone,
-and the decisions-log status guard enforces it.
+Then apply the `agent-kit:design-exploration` skill's "After a decision"
+to the plan: one fresh-eyes self-review, fixed inline, and — where the
+project keeps a decisions log and the decision is load-bearing — an entry
+drafted with `**Status:** Proposed`. You MUST NOT mark it
+`**Status:** Accepted`: ratification is the operator's act alone, and the
+decisions-log status guard enforces it.
 
 ### Stage 5 — Cost report
 
