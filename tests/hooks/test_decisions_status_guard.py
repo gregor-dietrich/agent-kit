@@ -947,6 +947,11 @@ def test_bash_write_after_changing_directory_is_denied(
         "node -e \"require('fs').writeFileSync('docs/decisions.md', '')\"",
         "git log -1 --format='**Status:** x' --output=docs/decisions.md",
         "git diff --output docs/decisions.md",
+        "git archive -o docs/decisions.md HEAD",
+        "git reset --hard HEAD~3 && grep Status docs/decisions.md",
+        "git cherry-pick abc1234 && grep Status docs/decisions.md",
+        "git read-tree -u -m HEAD~3 && cat docs/decisions.md",
+        "git checkout-index -f docs/decisions.md",
     ],
 )
 def test_other_writers_are_denied(command: str) -> None:
