@@ -15,8 +15,16 @@ written in uppercase.
 Before finalizing code-review findings, gather all surrounding context:
 the PR description, its linked issue(s), the overarching epic, and the
 **comments** on each. A candidate finding that a linked issue, epic or
-comment already explains, accepts, or tracks is a **false positive** —
-drop it.
+comment **explains away** is a **false positive** — drop it. One that a
+linked issue, epic or comment, or any other tracker issue, already
+**accepts or tracks** is not a false positive: the claim is true; it
+simply already has a destination. It is not re-raised, but it stays in
+the report as a stated drop that names what holds it, marked `instance`
+where marks apply (see "Mark each finding novel or instance" and
+"Scope" below). When the two are written as one verdict, they leave the
+same trace: a duplicate of a known class looks like a refuted claim, and
+it vanishes from the novel/instance count that is the only signal of
+whether the review loop still finds new classes.
 
 Comments are the part most often missed, and tracker CLIs omit them from
 some single-entity reads. With `tea`, every single-issue/PR view but
@@ -37,7 +45,7 @@ substitute.
 
 One word per finding: a **novel class** nothing in the repo yet
 anticipates, or an **instance** of a known one — naming the mechanized
-check, rule file, or prior finding it instances.
+check, rule file, prior finding or tracking issue it instances.
 
 An instance of a class a check already covers is the stronger signal of
 the two: it means the rule has the wrong _scope_, so say which rule and
@@ -63,6 +71,15 @@ if it keeps one) are not to be re-raised. That force belongs to
 **Accepted** entries only: an entry marked `**Status:** Proposed` is a
 draft — cite it as context, never as settled, and a finding that
 contradicts it is an ordinary finding.
+
+Not re-raising a finding is not the same as refuting it, and the split
+under "Gather context before finalizing findings" applies here too. A
+finding an Accepted entry's rationale shows to be false is a **false
+positive**. A true finding the entry accepts as a known cost (say, "N%
+of the tree is omitted from coverage" against a recorded omit policy) is
+not: it stays in the report as a stated drop that names the entry,
+marked `instance` where marks apply. The same holds for a convention
+the project's `AGENTS.md` records together with its rationale.
 
 **Exception:** an entry carrying a **Premise:** line is closed only while
 that premise holds. A finding that shows the premise has failed is a real

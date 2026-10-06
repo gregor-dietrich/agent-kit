@@ -44,12 +44,12 @@ MUST read them before reviewing; a convention you cite must be one they state.
 - When the review is the deliverable (a pre-merge review, an
   `/agent-kit:ai-review` run, a commissioned audit), mark each finding
   `novel` (a class nothing in the project yet anticipates) or `instance`
-  (naming the check, `AGENTS.md` rule or prior finding it instances). An
-  instance of a class a check already covers means that check has the wrong
-  scope: say which check and which files it misses. An in-loop verification
-  pass (vetting a subagent's diff inside an implementation session) omits
-  the marks (see `agent-kit:review-triage`, "Mark each finding novel or
-  instance" and "Scope")
+  (naming the check, `AGENTS.md` rule, prior finding or tracking issue it
+  instances). An instance of a class a check already covers means that check
+  has the wrong scope: say which check and which files it misses. An in-loop
+  verification pass (vetting a subagent's diff inside an implementation
+  session) omits the marks (see `agent-kit:review-triage`, "Mark each finding
+  novel or instance" and "Scope")
 
 ## Gather context BEFORE finalizing findings
 
@@ -58,16 +58,24 @@ MUST read them before reviewing; a convention you cite must be one they state.
   artifact files it names. You have no Bash, so you cannot fetch them
   yourself. If no digest was supplied, say so and mark every
   tracker-dependent judgment **unverified** rather than guessing. A candidate
-  finding that a linked issue, epic or comment already explains, accepts or
-  defers is a false positive: drop or down-rank it (see
-  `agent-kit:review-triage`, "Gather context before finalizing findings")
-- Settled decisions are not findings. An entry marked `**Status:** Accepted`
+  finding that a linked issue, epic or comment **explains away** is a
+  **false positive**: drop it. One that a linked issue, epic or comment, or
+  any other tracker issue, already **accepts or tracks** is not a false
+  positive: the claim is true and already has a destination. Do not re-raise
+  it, but keep it in the report as a stated drop naming what holds it, marked
+  `instance` when the review is the deliverable (see `agent-kit:review-triage`,
+  "Gather context before finalizing findings")
+- Settled decisions are not re-raised. An entry marked `**Status:** Accepted`
   in the project's decisions log, if it keeps one, closes its question; so
   does a convention its `AGENTS.md` records together with its rationale. Read
-  that rationale before raising a finding in its shape. Observed in practice:
-  "the 100% coverage claim is overstated, N% of the tree is omitted" was the
-  most-repeated false positive in a project whose omit list and its reasons
-  were documented in plain sight
+  that rationale before raising a finding in its shape. Where it shows the
+  claim false, the finding is a false positive: drop it. Where it accepts a
+  true claim as a known cost, keep it in the report as a stated drop naming
+  the entry, marked `instance` when the review is the deliverable. Observed
+  in practice: "the 100% coverage claim is overstated, N% of the tree is
+  omitted" was the most-repeated re-raise in a project whose omit list and
+  its reasons were documented in plain sight; the claim was true, and
+  already accepted
 - A `**Status:** Proposed` entry is a draft: cite it as context, never as
   settled; a finding that contradicts it is an ordinary finding. Exception
   to settled: an Accepted entry carrying a `**Premise:**` line holds only

@@ -223,10 +223,11 @@ findings"):
   contradicted a diagnosis recorded on its own issue,
 - the status of any entry in the project's decisions log, if it keeps one,
   that the diff touches or that a candidate finding might re-raise: an
-  **Accepted** entry is closed — citing it as a finding is a false
-  positive — **except** where its `**Premise:**` line has demonstrably
-  failed, which is a real finding; a **Proposed** entry is context only,
-  never settled (review-triage, "Settled decisions are not findings"),
+  **Accepted** entry is closed — a finding it refutes is a false
+  positive, and a true one it accepts is a stated `instance` drop —
+  **except** where its `**Premise:**` line has demonstrably failed,
+  which is a real finding; a **Proposed** entry is context only, never
+  settled (review-triage, "Settled decisions are not findings"),
 - the **open issue list**, paged — a per-page limit silently truncates a
   single call. A follow-up the PR body says it "proposed, not filed" may
   since have been filed, and a gap the diff leaves open may already be
@@ -274,10 +275,14 @@ Each Stage 1 prompt MUST embed:
 - the scope (the path to the full-diff artifact, or an explicit file list
   for `deep`),
 - the Stage 0 context digest,
-- the false-positive rules: a finding a linked issue, epic or comment
-  already explains, accepts, or tracks; an Accepted-decision re-raise
-  (with the `Premise:` exception above); and any pattern the project has
-  recorded as a settled, recurring false positive,
+- the false-positive rule: a finding that a linked issue, epic or
+  comment, an Accepted decision's rationale (with the `Premise:`
+  exception above) or a pattern the project records as settled
+  explains away,
+- the tracked-finding rule: a finding that any of those, or any other
+  tracker issue, already accepts or tracks is not a false positive. It
+  is not re-raised, but it stays in the report as a stated drop, marked
+  `instance` and naming what holds it,
 - an explicit **NO-CAP** instruction: report every verified finding,
   ranked by severity, tail included — the built-in's 10-finding cap does
   not apply here,
@@ -440,8 +445,8 @@ Report every surviving finding, ranked by severity, no cap. Per finding:
   release milestone only on the project's release-admission bar, if its
   decisions log defines one,
 - a one-word `novel` / `instance` mark — `instance` names the mechanized
-  check, `AGENTS.md` rule, or prior finding it instances (review-triage,
-  "Mark each finding novel or instance").
+  check, `AGENTS.md` rule, prior finding or tracking issue it instances
+  (review-triage, "Mark each finding novel or instance").
 
 When the review target is, or has, an open PR, post the full verified set
 as a PR comment with the tracker CLI **before** acting on any of it.

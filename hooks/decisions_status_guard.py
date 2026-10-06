@@ -3,8 +3,8 @@
 
 A decisions log (docs/decisions.md) marks each ``## ADR-NNNN`` entry
 **Status:** Accepted | Proposed | retired. Accepted carries real force: a
-review finding that re-raises an Accepted entry is a false positive. So an
-agent that can set Accepted can ratify its own draft and thereby suppress
+review finding that re-raises an Accepted entry is dropped. So an agent
+that can set Accepted can ratify its own draft and thereby suppress
 objections to it.
 
 Three transitions are therefore blocked on docs/decisions.md, judged

@@ -89,8 +89,8 @@ and rejected: it is blunt — it would block one-line fixes, doc tweaks,
 and every edit where the context-rediscovery tax exceeds the saving — and
 the question it would need to answer ("big enough to delegate?") has no
 single right answer, so a faithful mechanized guard does not exist.
-Re-proposing it is a false positive unless the steering-model economics
-change fundamentally.
+Re-proposing it is a settled-decision re-raise to drop, not a finding,
+unless the steering-model economics change fundamentally.
 
 Recording a _rejected_ alternative is as load-bearing as recording the
 accepted one: without it, the same proposal returns every few sessions
