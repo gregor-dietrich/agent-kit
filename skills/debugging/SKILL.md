@@ -92,11 +92,17 @@ guess presented as a diagnosis is worse than no diagnosis.
    a test, and it MUST fail for the right reason before the fix lands —
    otherwise you have not shown it tests the bug. A regression test
    follows your normal test conventions like any other. Some real defects
-   are not expressible: a wrong URL or a stale enumeration in a doc, an
-   operator-facing comment in a shipped config file, or code your coverage
-   config deliberately omits. There, say plainly that no test can express
-   it and verify the fix directly instead — the honest exit, not a licence
-   to skip a test that could have been written.
+   are not expressible: a wrong URL or a stale enumeration in a doc, or an
+   operator-facing comment in a shipped config file. There, say plainly
+   that no test can express it and verify the fix directly instead — the
+   honest exit, not a licence to skip a test that could have been written.
+   A defect in code your coverage config deliberately omits is **not** one
+   of those cases: an omit takes code out of the coverage gate, not out of
+   testing. Its regression test lands in whatever suite reaches that code
+   — integration tests, a browser journey (Playwright or the like) — and
+   simply does not move the coverage number. That suite may sit outside
+   the gates, so run it to see the test fail first. Where no suite reaches
+   the code yet, say so as a test gap, not as the not-expressible exit.
 2. **One change.** No bundled refactor, no "while I'm here" cleanup —
    those are separate commits at best and separate PRs at worst.
 3. **Verify with the real gate**, not by inspection: the project's fast
