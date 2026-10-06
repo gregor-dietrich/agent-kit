@@ -201,14 +201,14 @@ none of them is a filing.
 
 Won't-fix carries a **conditional** documentation duty, not an automatic
 one. Record it only where a later session would plausibly **re-derive it
-wrongly** — the `agent-kit:design-exploration` skill's test for a
-decisions-log entry ("After a decision"), read one level down. Most
+wrongly** — the second of the `agent-kit:design-exploration` skill's
+three tests for a decisions-log entry ("After a decision"). Most
 won't-fix findings fail it: nobody was going to raise them again, and a
 record nobody would have relitigated buys nothing while still costing
 upkeep. Where the duty does apply, the home is the closest one — the
 script's header, the package's `AGENTS.md`, the rule file that already
-governs it — and a decisions-log entry only where that entry would be
-load-bearing. Silence is the right outcome for a taste finding; the most
+governs it — and a decisions-log entry only where it passes all three
+tests. Silence is the right outcome for a taste finding; the most
 expensive possible one is a taste finding promoted to a decisions-log
 entry.
 

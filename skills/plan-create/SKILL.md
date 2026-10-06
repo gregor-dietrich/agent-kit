@@ -132,8 +132,8 @@ Only after Stage 3 is answered. See "The plan file" below.
 
 Then apply the `agent-kit:design-exploration` skill's "After a decision"
 to the plan: one fresh-eyes self-review, fixed inline, and — where the
-project keeps a decisions log and the decision is load-bearing — an entry
-drafted with `**Status:** Proposed`. You MUST NOT mark it
+project keeps a decisions log and the decision passes that section's three
+tests — an entry drafted with `**Status:** Proposed`. You MUST NOT mark it
 `**Status:** Accepted`: ratification is the operator's act alone, and the
 decisions-log status guard enforces it.
 

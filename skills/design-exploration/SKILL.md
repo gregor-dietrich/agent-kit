@@ -115,9 +115,41 @@ requirement admitting two readings, and any scope that has quietly grown
 past one implementation.
 
 If the decision is load-bearing — it constrains future work, or a later
-reader would otherwise relitigate it — it becomes a decisions-log entry,
-in the shape that log defines: **Premise** where it was decided on
-analysis under stated conditions, and then a **Guard** naming what
-notices when the premise fails. An agent MAY draft the entry and MUST NOT
-mark it `**Status:** Accepted`; ratification is the author's act alone,
-and agent-kit's decisions-log status guard enforces that.
+reader would otherwise relitigate it — and passes the three tests below,
+it becomes a decisions-log entry, in the shape that log defines:
+**Premise** where it was decided on analysis under stated conditions, and
+then a **Guard** naming what notices when the premise fails. An agent MAY
+draft the entry and MUST NOT mark it `**Status:** Accepted`; ratification
+is the author's act alone, and agent-kit's decisions-log status guard
+enforces that.
+
+**A decision earns an entry only if forgetting it would cost more than
+keeping it.** That is a floor under "load-bearing", whose two halves are
+wide enough to let almost any decision through. Three tests, **all** of
+which MUST hold:
+
+- the choice was genuinely **contested** — two defensible options were
+  weighed, not one written up after the fact;
+- a later session would plausibly re-derive it **wrongly**, not merely
+  re-derive it;
+- its reasoning has **no closer home** — none exists, or none would
+  carry the force an Accepted entry has against a re-raise, where that
+  force is itself the point.
+
+The third does most of the work. A choice about one script belongs in that
+script's header, a component's convention in its `AGENTS.md`, a workflow
+rule in the rule or skill file that already governs it. Below the bar,
+record the reasoning in that closer home, if it needs recording at all,
+and write nothing in the log: an entry nobody would have relitigated buys
+no anti-relitigation force while still costing upkeep, and a log thickened
+with such entries stops being read. Length is not the test either way; a
+short entry that fails one test still fails, and a long one that passes
+all three is earning its space.
+
+The typical failure is a further copy: an entry whose measurement,
+premise and argument already sit in a script's header, a compatibility
+note and a rule file passes the first two tests and fails the third. Its
+one piece of unique content, if it has one, moves to the closest of
+those homes, and the entry is not written. One already in the log is the
+author's to retire: propose it, since deleting an entry is, like
+ratifying one, the author's act.
