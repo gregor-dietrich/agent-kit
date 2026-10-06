@@ -117,9 +117,28 @@ it is lost unless the prompt asks for it.
   forecast is what fails, a clobbered edit surfaces as an absence rather
   than in a returned diff, and the cost on the other side is only setup
   time and disk. A sequential run needs none of it.
+- **Where auto mode is on, keep worktrees under `.worktrees/`.** The
+  harness's isolation option puts its worktrees under `.claude/worktrees/`,
+  and Claude Code's auto mode treats everything under `.claude/` as agent
+  configuration: it refuses Edit, Write and some Read calls there with
+  "The user doesn't want to take this action right now", which reads like
+  an unanswered prompt rather than a refusal. Create the worktree yourself
+  from the landing branch's tip, with
+  `git worktree add --detach .worktrees/<name> HEAD`, and pass its
+  absolute path in the dispatch prompt. `.worktrees/` must be ignored —
+  unignored, the nested checkout shows as untracked and Stage 4's clean
+  tree is never clean — so add it to the file
+  `git rev-parse --git-path info/exclude` names where the project's
+  `.gitignore` lacks it. Set the worktree up as the project's `AGENTS.md`
+  says; a virtualenv, for one, records absolute paths, so each worktree
+  needs its own. Once its work has landed, remove it with
+  `git worktree remove --force .worktrees/<name>`: the harness cleans up
+  only its own worktrees, and the work in this one was never committed.
 - When a dispatch runs isolated, say how its work reaches the tree Stage 4
-  gates and commits — e.g. merge or cherry-pick the worktree's branch, or
-  apply its diff, after reading it in full. That tree is the one the gates
+  gates and commits. Subagents never commit, so the work sits uncommitted
+  in the worktree, its new files untracked: stage it there
+  (`git -C <worktree> add -A`), read `git -C <worktree> diff --cached` in
+  full, and apply it to the landing tree. That tree is the one the gates
   run against, and an isolated result that never lands there is not in
   what gets pushed.
 - Escalate a model tier only on failure — a second red gate run, or a diff
