@@ -31,10 +31,12 @@ replaces it end to end.
 
 - Every dispatch MUST name a pinned agent type (`agent-kit:code-reviewer`,
   `agent-kit:scout`, `agent-kit:backend-developer`,
-  `agent-kit:frontend-developer`, …), except an optional Stage 1c
-  cross-family bridge the project provides. The `model:` pin in the agent
-  definition's frontmatter is the source of truth — **read it**, do not
-  recall it from memory or from this skill.
+  `agent-kit:frontend-developer`, …, or the project's own type for the
+  same role, which takes precedence here and wherever a stage below names
+  an agent-kit type: `agent-kit:delegation`, "The policy"), except an
+  optional Stage 1c cross-family bridge the project provides. The `model:`
+  pin in the agent definition's frontmatter is the source of truth —
+  **read it**, do not recall it from memory or from this skill.
 - General-purpose (unpinned) dispatches are **FORBIDDEN** in this
   workflow — that is the exact defect this skill exists to route around.
   The harness's built-in agent types (`Explore`, `Plan`, …) are **equally

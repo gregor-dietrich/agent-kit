@@ -31,9 +31,11 @@ through unpinned vehicles.
 ## Dispatch policy
 
 - Every dispatch MUST name a pinned agent type — here, `agent-kit:scout`
-  (context) and `agent-kit:software-architect` (design). The `model:` pin
-  in the agent's definition is the source of truth — **read it**, do not
-  recall it from memory or from this skill.
+  (context) and `agent-kit:software-architect` (design), or the project's
+  own type for the same role, which takes precedence here and wherever a
+  stage below names an agent-kit type (`agent-kit:delegation`, "The
+  policy"). The `model:` pin in the agent's definition is the source of
+  truth — **read it**, do not recall it from memory or from this skill.
 - General-purpose (unpinned) dispatches are **FORBIDDEN**, as are the
   harness's built-in types, for the reason above. The
   `agent-kit:delegation` skill, "The policy", carries the reasoning **and

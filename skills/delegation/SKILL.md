@@ -21,6 +21,17 @@ Work is routed by explicit dispatch, and only by explicit dispatch:
   (`agent-kit:scout`); a project may define its own. The `model:` pin in
   the agent's frontmatter is the source of truth — read it, never recall
   it.
+- **Where the project defines its own agent type or skill for a role
+  agent-kit also covers, the project's wins.** It carries the project's
+  settled decisions and conventions; agent-kit's is the generic fallback
+  for a project that has none. Match by role, not by name: a project's
+  reviewer under another name still displaces `agent-kit:code-reviewer`,
+  and its own review or planning skill displaces `/agent-kit:ai-review`
+  or `/agent-kit:plan-create`. A project agent displaces agent-kit's only
+  when it is pinned and its `tools:` fit what the role's step relies on
+  (no writes for a reviewer, a shell for an empirical check); otherwise
+  dispatch agent-kit's and say why. A skill the user invoked by name is
+  the one they meant.
 - Read-only types are not read-only _alike_. A type that omits `Bash`
   from its `tools:` is read-only at the harness level; a type granted
   Bash for read-only `git` reads is read-only by _instruction only_.

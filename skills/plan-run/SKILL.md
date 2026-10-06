@@ -33,8 +33,11 @@ from that rather than justifying it.
   `agent-kit:backend-developer` or `agent-kit:frontend-developer`
   (writing), and `agent-kit:code-reviewer` or
   `agent-kit:software-architect` (read-only judgment) where a return needs
-  vetting. The `model:` pin in the agent's definition is the source of
-  truth — **read it**, do not recall it from memory or from this skill.
+  vetting, or the project's own type for the same role, which takes
+  precedence here and wherever a stage below names an agent-kit type
+  (`agent-kit:delegation`, "The policy"). The `model:` pin in the agent's
+  definition is the source of truth — **read it**, do not recall it from
+  memory or from this skill.
 - General-purpose (unpinned) dispatches are **FORBIDDEN**, as are the
   harness's built-in agent types: neither carries a `model:` pin, so a
   bare dispatch silently inherits the steering model. That looks like
