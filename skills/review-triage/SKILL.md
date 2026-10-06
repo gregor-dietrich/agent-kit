@@ -1,6 +1,6 @@
 ---
 name: review-triage
-description: "How code-review findings are gathered, recorded and routed: context to read before finalizing findings (linked issues and their comments), recording on the PR, novel/instance marks, settled decisions, no finding cap, and the destination every finding must reach (fixed, filed, or explicitly dropped). Read it whenever reviewing a diff, PR or audit, triaging review findings, or deciding whether to fix, file or ask about one."
+description: "How code-review findings are gathered, recorded and routed: context to read before finalizing findings (linked issues and their comments), recording on the PR, novel/instance marks, settled decisions, no finding cap, and the destination every finding must reach (fixed, filed, or explicitly dropped). Read it whenever reviewing a diff, PR or audit, triaging review findings, or deciding whether to fix, file, drop or ask about one."
 ---
 
 # Code review: context, recording and triage
@@ -58,11 +58,11 @@ and any audit of the loop's yield can only report itself as unevaluable.
 These duties bind review sessions, not every dispatch. They apply when
 the review is the deliverable — a pre-merge diff review, a commissioned
 audit. An in-loop verification pass (a reviewer dispatch vetting a
-subagent's diff inside an implementation session) MUST NOT record outside
-its loop — no PR comment, no `novel`/`instance` marks; its findings are
-acted on or dropped in-session. One exception: a finding about code
-**outside** the diff being verified is still reported and triaged so it
-is not lost.
+subagent's diff inside an implementation session) MUST NOT record
+outside its loop — no PR comment, no `novel`/`instance` marks; its
+findings are acted on in-session, or dropped on a ground under "What may
+be dropped". One exception: a finding about code **outside** the diff
+being verified is still reported and triaged so it is not lost.
 
 ## Settled decisions are not findings
 
@@ -132,7 +132,8 @@ is the user's: a design choice with more than one defensible answer, a
 user-visible behaviour change, a scope call, a tracker mutation. Being
 merely out-of-diff does not qualify a finding for it. When you propose,
 **name the decision you are deferring and why it is not yours to make**;
-if you cannot name one, that is the signal to fix it or drop it instead.
+if you cannot name one, that is the signal to fix, file or drop it
+instead.
 
 ### Measure the fix, not its headline
 
@@ -147,8 +148,9 @@ thing — takes seconds.
 
 Filing-has-a-cost kills the _filing_, never the _finding_: every reported
 finding must reach a terminal destination — **fixed**, **filed**, or
-**explicitly dropped** with the drop stated as such. "Recorded in the
-review comment" is reporting, not a destination — a merged PR's comments
+**explicitly dropped** with the drop stated as such, on one of the
+grounds under "What may be dropped" below. "Recorded in the review
+comment" is reporting, not a destination — a merged PR's comments
 are not a tracking home, so a finding parked there is a drop that doesn't
 say its name.
 
@@ -173,3 +175,47 @@ file it or drop it, and say which.
 > out to do. A later review then closed by reporting five open proposals
 > as disposed of, four of them recorded only in a PR description.
 > Proposing has never been a way to be done with a finding.
+
+### What may be dropped
+
+Dropping is a real destination, and it needs a criterion like the
+others: without one, **filed** becomes the safe default for anything a
+review cannot fix on the spot, and the tracker becomes the memory of
+every true statement about the codebase. Four grounds; a drop that fits
+none of them is a filing.
+
+- **Refuted.** The claim is false. Say what refuted it.
+- **Unverified, and not worth verifying.** An uncertain finding whose
+  confirmation would cost more than the defect if real. This is a
+  decision about the _investigation_, not about the fix: nothing was
+  established, so nothing is documented. Do not launder it into a filing
+  instead — an issue asserting an unverified claim is worse than no
+  issue, since a tracker's issues stay load-bearing only while they do
+  not do that.
+- **Already tracked or accepted elsewhere.** True, but not novel — by a
+  tracker issue or an Accepted decision. See "Gather context before
+  finalizing findings" and "Settled decisions are not findings" for why
+  this is not a refutation and how to mark it.
+- **Won't-fix.** True, and the change is declined on its merits. The
+  test is **would you decline this fix if it were free?**
+
+Won't-fix carries a **conditional** documentation duty, not an automatic
+one. Record it only where a later session would plausibly **re-derive it
+wrongly** — the `agent-kit:design-exploration` skill's test for a
+decisions-log entry ("After a decision"), read one level down. Most
+won't-fix findings fail it: nobody was going to raise them again, and a
+record nobody would have relitigated buys nothing while still costing
+upkeep. Where the duty does apply, the home is the closest one — the
+script's header, the package's `AGENTS.md`, the rule file that already
+governs it — and a decisions-log entry only where that entry would be
+load-bearing. Silence is the right outcome for a taste finding; the most
+expensive possible one is a taste finding promoted to a decisions-log
+entry.
+
+**"Real, but I'll never get to it" is not on the list.** It is the
+tempting fifth ground, and it is a filing decision wearing a triage
+decision's clothes: the finding is not declined, only unscheduled, and
+an unscheduled issue is where it goes. The free-fix test above separates
+the two — decline the change and it is a drop, decline the schedule and
+it is a filing. Dropping there is how a finding count falls without
+anything having been decided.

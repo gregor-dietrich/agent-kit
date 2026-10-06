@@ -455,7 +455,8 @@ unprompted. That bar is about **writing to the tracker**, not about fixing
 code: a small out-of-diff fix is applied and reported, not proposed.
 
 Every finding must reach a terminal destination — fixed, filed, or
-explicitly dropped with the drop stated as such. "Recorded in the review
+explicitly dropped with the drop stated as such, on one of review-triage's
+drop grounds ("What may be dropped"). "Recorded in the review
 comment" is reporting, not a destination (review-triage, "Every finding
 reaches a terminal destination").
 
@@ -474,7 +475,7 @@ and a headline is not a measurement. Then apply "Asking has a cost too":
 design choice with more than one defensible answer, a user-visible
 behaviour change, a scope call, a tracker mutation) — never a parking
 space for a finding that is merely out-of-diff. If you cannot name the
-decision you are deferring, fix it or drop it.
+decision you are deferring, fix, file or drop it.
 
 ### Stage 4 — Fixes (only when the standing ask applies)
 
