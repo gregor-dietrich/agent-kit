@@ -31,7 +31,13 @@ that can break silently.
   effect it cannot model (a patch it cannot simulate, an Edit whose
   `old_string` it cannot locate), is denied: passing it is the bypass.
 - Keep `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` at the
-  same `name` and `version`.
+  same `name` and `version`, and bump that version past main's in every
+  change that lands. Claude Code caches an installed copy of the whole
+  tree under its version and updates only when the version moves, so a
+  change shipped at an unchanged version never reaches a machine that
+  already has it, not even through a reinstall; Codex keys its cache by
+  version too. Two branches bumping to the same number merge without a
+  conflict, so check main's version before merging.
 - Name no other repository, project or person in shipped files. Anything
   a project needs to say about itself belongs in that project's own
   `AGENTS.md`.
