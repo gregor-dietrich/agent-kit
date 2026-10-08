@@ -20,7 +20,10 @@ Work is routed by explicit dispatch, and only by explicit dispatch:
   `agent-kit:software-architect`) and one read-only exploration type
   (`agent-kit:scout`); a project may define its own. The `model:` pin in
   the agent's frontmatter is the source of truth — read it, never recall
-  it.
+  it. A scout dispatch whose answer is a closed list (locations, counts,
+  inventories) with no verdict MAY pass `model: haiku`; anything that
+  judges stays on the pinned model, so writing agents stay on sonnet and
+  the reviewer and architect on opus.
 - **Where the project defines its own agent type or skill for a role
   agent-kit also covers, the project's wins.** It carries the project's
   settled decisions and conventions; agent-kit's is the generic fallback
@@ -88,7 +91,7 @@ fix.
 ## Cost observability
 
 A session that dispatched agents MUST report, at the end: agents spawned
-(per dispatch: agent type, pinned model, tokens from the tool result) and
+(per dispatch: agent type, model run, tokens from the tool result) and
 totals. If a tool result carries no token count, report the dispatch
 count and mark tokens unavailable — never invent figures.
 

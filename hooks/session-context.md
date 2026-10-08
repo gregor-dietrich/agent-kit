@@ -14,5 +14,5 @@ apply whenever you dispatch subagents (read the skill before a fan-out):
 - A small edit whose closed spec would outweigh its diff stays in the
   steering loop; a non-trivial one goes to a pinned writing agent.
 - A session that dispatched agents ends with a cost report: per dispatch
-  the agent type, pinned model and tokens from the tool result, plus
+  the agent type, model run and tokens from the tool result, plus
   totals. Mark tokens unavailable when none were reported; never estimate.

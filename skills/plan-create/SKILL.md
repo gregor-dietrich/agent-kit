@@ -142,7 +142,7 @@ decisions-log status guard enforces it.
 ### Stage 5 — Cost report
 
 Per the `agent-kit:delegation` skill, "Cost observability": every
-dispatch — stage, agent type, pinned model, tokens from the tool result —
+dispatch — stage, agent type, model run, tokens from the tool result —
 plus totals. If a tool result carries no token count, report the dispatch
 count and mark tokens unavailable; never invent figures.
 

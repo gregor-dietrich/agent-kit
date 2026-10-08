@@ -505,7 +505,7 @@ produces; this stage runs only then.
 
 ### Stage 5 — Cost report (every run, all modes)
 
-A table of every dispatch made — stage, agent type, pinned model, tokens
+A table of every dispatch made — stage, agent type, model run, tokens
 consumed (read from each `Agent` tool result) — plus totals: agents
 spawned and tokens consumed. If a tool result does not surface a token
 count, report the dispatch count and mark tokens as **unavailable** —
