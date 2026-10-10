@@ -76,7 +76,9 @@ the UI conventions and the code style you follow.
 3. Hand the UI plain data snapshots, never live data-access objects whose
    session may already be closed
 4. Test pure helpers directly, and UI behaviour with the project's UI test
-   harness
+   harness. State that outlives a test (shared singletons, committed rows,
+   files, caches) is keyed by unique identifiers, or reset or rolled back
+   per test
 5. Validate with the project's gates as its `AGENTS.md` names them (e.g.
    `make lint`, `make test`), invoking tools the way it prescribes and scoped
    to what you touched where the gates allow. Never claim a gate green

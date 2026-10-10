@@ -252,10 +252,12 @@ Dispatch count depends on mode (`auto` has already resolved to `quick` or
 `standard` by this point):
 
 - **`quick`** — 1 dispatch, covering all review dimensions
-  (correctness/tests, security, conventions/architecture/docs) at once,
-  self-verifying. No Stage 2.
+  (correctness/tests/performance, security,
+  conventions/architecture/maintainability/docs) at once, self-verifying.
+  No Stage 2.
 - **`standard`** (default) — 3 dispatches, split by dimension: (a)
-  correctness + tests, (b) security, (c) conventions/architecture/docs.
+  correctness + tests + performance, (b) security, (c)
+  conventions/architecture/maintainability/docs.
 - **`standard`, widened** — only after the ceiling ask above was put and
   answered. One dispatch per surface, **plus** one cross-cutting security
   dispatch over the whole diff, which is not one more surface but the

@@ -77,7 +77,9 @@ and the code style you follow.
    helper before writing a new one
 2. Follow the project's patterns for shared state, naming, private helpers
    and file I/O as its docs define them
-3. Write or update tests following the project's test conventions
+3. Write or update tests following the project's test conventions. State
+   that outlives a test (shared singletons, committed rows, files, caches)
+   is keyed by unique identifiers, or reset or rolled back per test
 4. Validate with the project's gates as its `AGENTS.md` names them (e.g.
    `make lint`, `make test`), invoking tools the way it prescribes and scoped
    to what you touched where the gates allow. Never claim a gate green
