@@ -1,0 +1,38 @@
+# Fetches the devkit commit devkit.toml pins; every job that calls make
+# needs it, since the Makefile runs ./devkitw at parse time.
+#
+# devkit.toml pins devkit's SSH URL and the forge requires sign-in for every
+# read, so CI fetches over HTTPS with the token passed in as `token`, sent as
+# basic auth (any user name) and masked in its encoded form too. The token
+# reaches the script only through the step's env, never interpolated into
+# the run text. The trap removes the header from ~/.gitconfig even when the
+# fetch fails. Needs the checkout first.
+#
+# The secret reaches whatever workflow a pushed branch carries, so every
+# writer of this repository can read it: give it to an account that can read
+# devkit and nothing else.
+name: Fetch devkit
+description: Fetch the pinned devkit over HTTPS with a token
+inputs:
+  token:
+    description: Token of an account that can read only the devkit repository
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Fetch devkit
+      shell: bash
+      env:
+        DEVKIT_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        if [ -z "${DEVKIT_TOKEN:-}" ]; then
+          echo "::error::DEVKIT_TOKEN secret is not set (or this is a fork PR, which receives no secrets); devkit cannot be fetched"
+          exit 1
+        fi
+        auth=$(printf 'ci:%s' "$DEVKIT_TOKEN" | base64 -w0)
+        echo "::add-mask::$auth"
+        git config --global url."https://git.vptr.de/".insteadOf "ssh://git@git.vptr.de:222/"
+        trap 'git config --global --unset http.https://git.vptr.de/.extraHeader' EXIT
+        git config --global http.https://git.vptr.de/.extraHeader "Authorization: Basic $auth"
+        ./devkitw path

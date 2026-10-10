@@ -1,0 +1,6 @@
+# Pin for devkit: devkitw reads only [devkit]. Bump version and commit
+# together, and copy devkitw from the new tag when it changed.
+[devkit]
+url = "ssh://git@git.vptr.de:222/gregor/devkit.git"
+version = "v0.5.0"
+commit = "a0c5412f99e49d6897d1848b3703f17a4bc9f36a"

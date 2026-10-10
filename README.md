@@ -114,6 +114,7 @@ clients do and requires a deny. Change a hook only with its tests.
 
 ## Developing
 
-See [AGENTS.md](AGENTS.md). `make test` syncs a uv-locked `.venv`
-(bootstrapping the pinned uv when none is installed) and runs the suite;
-CI runs the same target.
+See [AGENTS.md](AGENTS.md). `make lint-repo` runs devkit's repository
+gates; `make test` syncs a uv-locked `.venv` (bootstrapping the pinned uv
+when none is installed) and runs the suite. CI runs both. Every `make`
+target fetches the pinned devkit on first use, which needs forge access.

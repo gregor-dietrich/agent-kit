@@ -1,0 +1,7 @@
+// devkit's profile, minus MD041: the agent definitions and three skills put
+// prose, not a heading, after their frontmatter, CLAUDE.md is an import, and
+// hooks/session-context.md is injected into every session as it stands.
+{
+  "extends": ".devkit/markdown/markdownlint.jsonc",
+  "MD041": false
+}

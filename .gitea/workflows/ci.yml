@@ -1,17 +1,37 @@
-# One job: the hook tests through the same entrypoint that runs locally.
-# `make test` syncs .venv from uv.lock, bootstrapping the pinned uv when the
-# runner has none. Actions are pinned by commit SHA; the comment names the
-# tag it resolved from.
+# One job: devkit's repository gates, then the hook tests, through the same
+# targets the pre-push hook runs locally. `make test` syncs .venv from
+# uv.lock, bootstrapping the pinned uv when the runner has none. Actions are
+# pinned by commit SHA; the comment names the tag it resolved from.
 name: ci
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # lint-secrets scans the full history and refuses a shallow clone.
+          fetch-depth: 0
+      # Before the setup actions, which put tool-cache directories on PATH
+      # ahead of the system's while the token is set.
+      - uses: ./.gitea/actions/fetch-devkit
+        timeout-minutes: 5
+        with:
+          token: ${{ secrets.DEVKIT_TOKEN }}
+      - run: ./devkitw self-check
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version-file: .python-version
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          check-latest: true # not a cached 22.x below devkit's node floor
+      - run: make lint-repo
       - run: make test

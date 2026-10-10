@@ -1,7 +1,14 @@
-.PHONY: help install test
+# devkit's common.mk brings help, check, hooks, gate and the repository
+# gates (lint-repo). Its python-uv.mk is not included: install and test
+# stay this project's own.
+PROJECT := agent-kit
+DEVKIT := $(shell ./devkitw path)
+ifeq ($(DEVKIT),)
+$(error devkitw failed; see its message above)
+endif
+include .devkit/make/common.mk
 
-help: ## List the targets
-	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-8s %s\n", $$1, $$2}'
+.PHONY: install test
 
 install: ## Sync .venv from uv.lock (bootstraps the pinned uv if missing)
 	@scripts/install.sh
