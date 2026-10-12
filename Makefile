@@ -13,5 +13,5 @@ include .devkit/make/common.mk
 install: ## Sync .venv from uv.lock (bootstraps the pinned uv if missing)
 	@scripts/install.sh
 
-test: install ## Run the hook tests
+test: install ## Run the test suite
 	.venv/bin/pytest

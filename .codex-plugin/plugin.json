@@ -1,6 +1,6 @@
 {
   "name": "agent-kit",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Guard hooks and review and planning skills for working with coding agents in any repository.",
   "license": "MIT",
   "skills": "./skills/",

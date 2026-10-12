@@ -1,0 +1,19 @@
+OpenAI Codex v0.160.0
+--------
+workdir: /tmp/project
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 01a130a6-4ca5-7691-a6f6-73c4c248c97f
+--------
+user
+Reply OK.
+
+warning: Codex could not find bubblewrap on PATH. Install bubblewrap with your OS package manager. See the sandbox prerequisites: https://developers.openai.com/codex/concepts/sandboxing#prerequisites. Codex will use the bundled bubblewrap in the meantime.
+codex
+OK
+tokens used
+2,990

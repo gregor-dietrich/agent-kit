@@ -13,16 +13,17 @@ that can break silently.
 | `.codex-plugin/plugin.json` | The Codex twin: same name and version, plus Codex's `interface` block |
 | `hooks/` | `hooks.json` (read by both clients), the guard scripts it registers, and `session-context.md`, the only text injected into every session |
 | `skills/` | One `<name>/SKILL.md` per skill, shared by both clients |
-| `agents/` | Generic role definitions (Claude Code only; Codex plugins carry no agents) |
-| `tests/` | pytest suite; every hook is pinned here |
+| `agents/` | Generic role definitions (Claude Code only; Codex plugins carry no agents); code-reviewer's `codex-*` keys pin the Codex bridge |
+| `scripts/` | `install.sh`, the dev venv helper `make test` runs, and `codex-agent.sh`, the opt-in Codex bridge ai-review Stage 1c fires |
+| `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here |
 | `devkitw`, `devkit.toml` | devkit's wrapper, copied verbatim from the pinned tag and never edited, and its pin |
 
 ## Rules
 
-- **No hook ships without its tests.** A PreToolUse hook that crashes
-  fails open — the tool call proceeds — so a broken guard is silent, and
-  the tests are what notices. Test what a guard denies _and_ what it
-  deliberately lets through.
+- **No hook — and no script a skill fires — ships without its tests.**
+  A PreToolUse hook that crashes fails open — the tool call proceeds —
+  so a broken guard is silent, and the tests are what notices. Test what
+  a guard denies _and_ what it deliberately lets through.
 - Hooks are stdlib-only Python plus a bash prefilter, and fail open on
   any payload they cannot parse. Never block a call you cannot read.
   They run under the user's `python3`, not the 3.13 test venv, so hook

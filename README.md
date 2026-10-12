@@ -40,6 +40,7 @@ setup that grows the way the original did.**
 | `skills/plan-create`, `skills/plan-run` | Decision → closed spec → pinned dispatches → PR | Any repository; gates and PR conventions come from the project's `AGENTS.md` |
 | `skills/ai-review` | Multi-agent review with pinned agents, stance-split verification and no finding cap | Any repository; risk paths can be named in the project's `AGENTS.md` |
 | `agents/*` | scout, code-reviewer, software-architect, backend-developer, frontend-developer | Claude Code only; each reads the project's own docs before acting |
+| `scripts/codex-agent.sh` | Pinned Codex dispatch for ai-review Stage 1c | Opt-in per project via a `<!-- agent-kit:codex-bridge -->` line; needs codex-cli 0.160.0 or later |
 
 ### The one that matters most
 
@@ -86,12 +87,28 @@ Codex holds plugin hooks back until they are trusted: open `/hooks` once
 after installing, and again after any update that changes a hook command —
 an untrusted hook is indistinguishable, from inside a session, from no
 guard at all. Codex plugins carry no agents, so the five roles are Claude
-Code only.
+Code only; the one exception is the headless Codex dispatch below.
 
 The hooks run under the first `python3` on `PATH` and need 3.10 or newer.
 Under an older one — the Command Line Tools `python3` on macOS is 3.9 —
 each guard refuses every call that reaches it, with a message naming the
 floor, rather than crashing and so letting everything through.
+
+### Codex bridge (opt-in)
+
+`/agent-kit:ai-review` Stage 1c can send a review to `code-reviewer`
+running on Codex through `scripts/codex-agent.sh`, which pins model,
+reasoning effort and sandbox from the `codex-*` keys in
+`agents/code-reviewer.md` and verifies them against the session banner.
+It sends the review prompt (the diff, the PR and issue threads, the
+context digest) to a second vendor, plus any file codex chooses to read,
+and the preamble itself points it at files outside the project. So it
+runs only where the project's root `AGENTS.md` carries the line
+`<!-- agent-kit:codex-bridge -->`, on its own; a project that names its
+own bridge keeps it. The bridge needs codex-cli 0.160.0 or later and
+passes `--ignore-user-config`: your `$CODEX_HOME/config.toml` is not
+loaded, so a custom provider or proxy setup cannot be used with it, while
+auth still comes from `CODEX_HOME`.
 
 ## Warning: a broken hook is a silent hook
 

@@ -34,9 +34,10 @@ replaces it end to end.
   `agent-kit:frontend-developer`, …, or the project's own type for the
   same role, which takes precedence here and wherever a stage below names
   an agent-kit type: `agent-kit:delegation`, "The policy"), except an
-  optional Stage 1c cross-family bridge the project provides. The `model:`
-  pin in the agent definition's frontmatter is the source of truth —
-  **read it**, do not recall it from memory or from this skill.
+  optional Stage 1c cross-family bridge the project provides or opts
+  into. The `model:` pin in the agent definition's frontmatter is the
+  source of truth — **read it**, do not recall it from memory or from
+  this skill.
 - General-purpose (unpinned) dispatches are **FORBIDDEN** in this
   workflow — that is the exact defect this skill exists to route around.
   The harness's built-in agent types (`Explore`, `Plan`, …) are **equally
@@ -134,8 +135,8 @@ choose. The three usually live:
    what it will not hold: name which surfaces would share a reviewer.
 2. **`standard`, widened** — Stage 1 re-split by **surface**, one dispatch
    per subsystem, **plus one cross-cutting security dispatch over the
-   whole diff**; Stage 2 stance-diverse. Where the project provides a
-   Stage 1c bridge, it is an element the operator may include or decline:
+   whole diff**; Stage 2 stance-diverse. Where a Stage 1c bridge is
+   available, it is an element the operator may include or decline:
    quote the total both with and without it, then record the choice.
 3. **`deep <surface>`** — when the concern is the surface's soundness
    rather than this change (see below).
@@ -342,8 +343,29 @@ unless the "executed" result is an inference, per the paragraph above.
 
 ### Stage 1c — Cross-family second opinion (optional)
 
-Only when the project provides a pinned cross-family bridge — e.g. a
-wrapper that runs a pinned Codex agent and verifies the pin took.
+Only when a pinned cross-family bridge is available, checked in this
+order:
+
+- the project's `AGENTS.md` names its own pinned cross-family bridge —
+  e.g. a wrapper that runs a pinned Codex agent and verifies the pin
+  took. That one takes precedence, as the project's own agent types do;
+- otherwise, its root `AGENTS.md` carries the opt-in as a line of its
+  own, exactly `<!-- agent-kit:codex-bridge -->`. When the diff under
+  review touches that root `AGENTS.md`, get the operator's explicit
+  confirmation first: a branch must not grant its own consent. Run
+  `<base>/../../scripts/codex-agent.sh code-reviewer <prompt-file>
+  <transcript-file>` from inside the project with the Bash tool's
+  `run_in_background` (a foreground call is capped at 10 minutes),
+  `<base>` being this skill's base directory and `<transcript-file>` a
+  fresh scratchpad path that does not exist yet. Read the bridge's
+  stdout (the verified answer) and its own short stderr lines, never the
+  transcript wholesale. The pin is the `codex-*` keys in
+  `<base>/../../agents/code-reviewer.md`. Any non-zero exit means this
+  stage did not happen. Exit 2 means codex was not run; on any other
+  exit (3, 124, 137, codex's own status) it ran and billed: record the
+  dispatch and the tokens the bridge reports in Stage 5. The bridge is a
+  cross-family arm only from a Claude Code steering session; a Codex
+  steering loop gets none from it.
 
 Every dispatch above runs on one model family. Correlated blind spots
 survive that unanimously, and five same-family reviewers agreeing is
