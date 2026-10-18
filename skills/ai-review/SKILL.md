@@ -516,16 +516,17 @@ produces; this stage runs only then.
   (a few mechanical lines, no design freedom) is applied directly by the
   steering loop — a spec longer than the patch spends more of every
   budget, steering tokens included, than the edit itself.
-- The steering loop MUST NOT apply fixes above that threshold itself, and
-  MUST read every dispatched agent's returned diff before committing —
-  never merge a subagent diff unread.
+- The steering loop MUST NOT apply fixes above that threshold itself. It
+  MUST read every returned diff before committing, as the
+  `agent-kit:delegation` skill, "The policy", sets out (once the dispatch
+  has ended, commit what was read, report lines are claims). Where a fix
+  dispatch runs isolated, its work lands by `/agent-kit:plan-run`'s
+  Stage 2 procedure.
 - Subagents never commit and never re-delegate; the steering loop commits.
-- Gates are the project's, as its `AGENTS.md` names them (e.g. `make
-  lint`, `make test`): the fast gate before each commit; then, once every
-  fix is committed (no untracked files), the full gate on that clean tree
-  before the single push at the end. Give the full gate, and any push that
-  runs it, a generous tool timeout, and never retry a timed-out push with
-  `--no-verify`.
+- Gates are the project's, as its rules name them (e.g. `make lint`,
+  `make test`): the fast gate before each commit; once every
+  fix is committed, the push gate before the single push at the end, as
+  the `agent-kit:push-gate` skill defines it.
 
 ### Stage 5 — Cost report (every run, all modes)
 

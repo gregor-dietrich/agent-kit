@@ -36,8 +36,9 @@ setup that grows the way the original did.**
 | `hooks/session-context.md` | The four delegation rules that hold on every dispatch, injected at session start | Any repository |
 | `skills/delegation` | Pinned-dispatch policy, the judgment threshold, cost reports | Any repository |
 | `skills/review-triage` | Context gathering, recording, `novel`/`instance` marks, finding destinations | Any repository; release bar comes from the project's decisions log |
-| `skills/debugging`, `skills/design-exploration` | Method: no fix without a root cause; two or three options and the operator's choice for a real design decision | Any repository; boundaries and gates come from the project's `AGENTS.md`. |
-| `skills/plan-create`, `skills/plan-run` | Decision → closed spec → pinned dispatches → PR | Any repository; gates and PR conventions come from the project's `AGENTS.md` |
+| `skills/debugging`, `skills/design-exploration` | Method: no fix without a root cause; two or three options and the operator's choice for a real design decision | Any repository; boundaries and gates come from the project's rules. |
+| `skills/plan-create`, `skills/plan-run` | Decision → closed spec → pinned dispatches → PR | Any repository; gates and PR conventions come from the project's rules |
+| `skills/push-gate` | Which gate a push owes, and how it runs | Any repository; narrower gates come from the project's rules |
 | `skills/ai-review` | Multi-agent review with pinned agents, stance-split verification and no finding cap | Any repository; risk paths can be named in the project's `AGENTS.md` |
 | `agents/*` | scout, code-reviewer, software-architect, backend-developer, frontend-developer | Claude Code only; each reads the project's own docs before acting |
 | `scripts/codex-agent.sh` | Pinned Codex dispatch for ai-review Stage 1c | Opt-in per project via a `<!-- agent-kit:codex-bridge -->` line; needs codex-cli 0.160.0 or later |

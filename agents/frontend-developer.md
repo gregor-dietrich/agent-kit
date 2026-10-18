@@ -87,8 +87,19 @@ the UI conventions and the code style you follow.
 
 ## Report
 
-- **Changed**: files touched and what each change does
-- **Gates**: what you ran and the result
+- **Changed**: from `git status --short --untracked-files=all` and
+  `git diff --stat`, run after your last edit (`--stat` alone omits
+  untracked files and staged edits): the files they show and what each
+  change does, and nothing they do not show. Run the same `git status`
+  before your first edit: a file already changed then is reported only
+  for your own changes to it. An edit you meant to make that they do not
+  show goes under **Unsure**
+- **Gates**: per gate, the exact command, its exit status, and the path of
+  a log holding its full output, written outside the working tree (a
+  `mktemp` file) so it never enters the diff
+  (`log=$(mktemp); make test >"$log" 2>&1; echo "exit=$?"`). Only a run
+  started after your last edit counts; a gate not re-run since is
+  reported as not run
 - **Left for others**: non-UI changes for `agent-kit:backend-developer`,
   boundary questions for `agent-kit:software-architect`
 - **Unsure**: what you were unsure about, and anything you could not verify

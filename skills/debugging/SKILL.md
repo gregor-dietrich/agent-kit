@@ -11,9 +11,10 @@ described in [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) /
 written in uppercase.
 
 Two steps take the project's specifics: the boundaries in Phase 1.4 and
-the gates in Phase 4.3, both from the project's `AGENTS.md`. This skill
-owns the general method, not individual tool traps; those belong in the
-project's own docs, and the two should not restate each other.
+the gates in Phase 4.3, both from the project's rules, the gate a change
+owes as the `agent-kit:push-gate` skill reads them. This skill owns the
+general method, not individual tool traps; those belong in the project's
+own docs, and the two should not restate each other.
 
 ## The rule
 
@@ -106,7 +107,8 @@ guess presented as a diagnosis is worse than no diagnosis.
 2. **One change.** No bundled refactor, no "while I'm here" cleanup —
    those are separate commits at best and separate PRs at worst.
 3. **Verify with the real gate**, not by inspection: the project's fast
-   and full gates as its `AGENTS.md` names them. Never read a gate's exit
+   gate, and the gate its rules require for this change (the
+   `agent-kit:push-gate` skill, "Which gate"). Never read a gate's exit
    status through a pipe — agent-kit's pipe-status guard denies that at
    the moment of the call, which is the only place prose reliably fails
    to reach.

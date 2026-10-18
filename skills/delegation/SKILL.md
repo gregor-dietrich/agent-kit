@@ -56,8 +56,15 @@ Work is routed by explicit dispatch, and only by explicit dispatch:
   — implementation of a closed spec belongs in a pinned writing agent's
   dispatch. (Framing a request as "plan, then execute" does not cause
   delegation; only an explicit pinned dispatch does.)
-- Never merge a subagent diff unread. Subagents never commit, and never
-  re-delegate.
+- Never merge a subagent diff unread. Read a dispatch's diff only once
+  the dispatch has **ended**, not merely once a report arrived: an agent
+  can keep working after its first report, and a later report supersedes
+  an earlier one. Commit exactly what was read: for work in the landing
+  tree, stage it, list what the text cannot show (`/agent-kit:plan-run`,
+  Stage 2, step 4), read the staged diff, and commit that index without
+  staging again. A report's **Changed** and **Gates** lines are claims,
+  not evidence: the diff and the gates the steering loop runs are.
+  Subagents never commit, and never re-delegate.
 - Keep delegations small and their specs closed (a competent stranger
   could execute without asking); require subagents to report what they
   were unsure about, not just what they did. Escalate a tier only on

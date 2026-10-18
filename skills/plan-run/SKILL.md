@@ -134,16 +134,39 @@ it is lost unless the prompt asks for it.
   `git rev-parse --git-path info/exclude` names where the project's
   `.gitignore` lacks it. Set the worktree up as the project's `AGENTS.md`
   says; a virtualenv, for one, records absolute paths, so each worktree
-  needs its own. Once its work has landed, remove it with
+  needs its own. Once the commit that carries its work exists, remove it with
   `git worktree remove --force .worktrees/<name>`: the harness cleans up
   only its own worktrees, and the work in this one was never committed.
 - When a dispatch runs isolated, say how its work reaches the tree Stage 4
   gates and commits. Subagents never commit, so the work sits uncommitted
-  in the worktree, its new files untracked: stage it there
-  (`git -C <worktree> add -A`), read `git -C <worktree> diff --cached` in
-  full, and apply it to the landing tree. That tree is the one the gates
-  run against, and an isolated result that never lands there is not in
-  what gets pushed.
+  in the worktree, its new files untracked.
+  1. Wait until the dispatch has ended (`agent-kit:delegation`, "The
+     policy").
+  2. Stage it in the worktree: `git -C <worktree> add -A`.
+  3. Write `git -C <worktree> diff --cached --binary --no-color
+     --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/` to its
+     own `mktemp` file, one per worktree; the pins make the patch immune
+     to a user's `color.ui`, `diff.noprefix` and textconv drivers.
+  4. List what the text cannot show, `git -C <worktree> diff --cached
+     --numstat --summary` (a `-` `-` row is binary; `--summary` shows mode,
+     symlink and submodule changes), and accept each only where the spec
+     names it. Then read the file in full.
+  5. Apply it to the landing tree with `git apply --whitespace=nowarn`
+     (atomic; the flag overrides an `apply.whitespace=fix` that would
+     rewrite lines silently; never `--reject` or `--3way`): what lands is
+     exactly what was read. The steering loop resolves a conflict between
+     two worktrees' patches as its own edit.
+  6. Before committing, and before the worktree is removed, repeat steps 2
+     and 3 in the worktree into a second file and `cmp` the two. Run no
+     gate in the worktree after step 3: its artifacts would show as a
+     difference. A difference means the agent was still writing or
+     something else changed the worktree: read it for its cause. To take
+     the new diff, revert what was applied since, newest first
+     (`git apply -R` per patch file; a conflict resolved by hand is undone
+     by hand), go back to step 1, and run the gates again on the result.
+
+  The landing tree is the one the gates run against, and an isolated
+  result that never lands there is not in what gets pushed.
 - Escalate a model tier only on failure — a second red gate run, or a diff
   needing rewrite. Do not pre-empt.
 
@@ -167,6 +190,16 @@ implementation session MUST NOT record outside its loop. No PR comment, no
 one exception is a finding about code **outside** the diff being verified,
 which is still reported and triaged.
 
+What counts as read, and that a report's **Changed** and **Gates** lines
+are claims, not evidence, is the `agent-kit:delegation` skill's, "The
+policy". An edit the report describes but the diff lacks did not happen. A
+Gates line says where to look and does not replace the gates Stage 4 runs
+on the landing tree. Where no push follows, the landing tree runs,
+before the commit, the gate that executes the delegated code (the
+project's tests, not only a fast gate that may be lint alone); where a
+push follows, the push gate covers it. Neither a report's green nor a
+worktree's says anything about the landing tree.
+
 ### Stage 4 — Gates, commit, PR (only as far as the ask covers)
 
 Invoking this skill is the ask to _execute_: commit the work. Push and
@@ -176,15 +209,12 @@ Otherwise commit, then say what is uncommitted and what a push would
 carry, rather than pushing unasked. Hold the push too whenever the run
 implies more commits are still coming.
 
-The gates are the project's, as its `AGENTS.md` names them (e.g.
-`make lint`, `make test`):
+The gates are the project's, as its rules name them (e.g. `make lint`,
+`make test`):
 
 - the **fast gate** before every commit;
-- the **full gate** before the single push, on a **clean tree**
-  (everything committed, no untracked files), so what it verified is
-  exactly what is pushed. Give it, and any push whose hook runs it, a tool
-  timeout long enough to finish, and never retry a timed-out push with
-  `--no-verify`. The invariant is that the pushed **tip** is gate-green;
+- the **push gate** before the single push, as the `agent-kit:push-gate`
+  skill defines it; read it;
 - never read a gate's exit status through a pipe (`make test | tail`
   reports `tail`'s), and the pipe-status guard denies that shape;
 - never invoke interactive or publishing targets (build, tag, release,
@@ -194,9 +224,9 @@ The gates are the project's, as its `AGENTS.md` names them (e.g.
   request also means open the PR.
 
 The PR description is the durable session summary: what landed and why,
-verification results, notable decisions, proposed follow-ups, and the
-Stage 5 cost report. Follow the project's PR conventions (labels, linked
-issue, closing keywords).
+verification results, the push gate that ran and why, notable decisions,
+proposed follow-ups, and the Stage 5 cost report. Follow the project's PR
+conventions (labels, linked issue, closing keywords).
 
 **Record the plan in the PR description** — its `.plans/` filename and a
 short digest of the decision it carries. `.plans/` is gitignored, so
