@@ -18,6 +18,10 @@ that can break silently.
 | `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here |
 | `devkitw`, `devkit.toml` | devkit's wrapper, copied verbatim from the pinned tag and never edited, and its pin |
 
+This repository opts in to that bridge for its own reviews:
+
+<!-- agent-kit:codex-bridge -->
+
 ## Rules
 
 - **No hook — and no script a skill fires — ships without its tests.**
@@ -72,6 +76,9 @@ that can break silently.
   and `test`.
 - `make hooks` once per clone: `pre-commit` runs `make lint-repo`,
   `pre-push` `make lint-repo test`.
+- `make gate` — runs the push gate (`lint-repo test`) and records a HEAD
+  that passed on a strictly clean tree; pre-push skips that HEAD while
+  the tree stays unchanged. A run that records nothing says why.
 - `claude plugin validate .` — after any manifest, hook, skill or agent
   change. Expected warnings: the two missing `author` fields, and the
   root `CLAUDE.md` not being plugin context (it is this repository's).

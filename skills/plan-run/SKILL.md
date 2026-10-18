@@ -119,7 +119,11 @@ it is lost unless the prompt asks for it.
   concurrency, not on a forecast that two agents would collide: the
   forecast is what fails, a clobbered edit surfaces as an absence rather
   than in a returned diff, and the cost on the other side is only setup
-  time and disk. A sequential run needs none of it.
+  time and disk. A sequential run needs none of it. Every worktree shares
+  the clone's git config and hooks directory, so a hook installed from
+  one is the hook every push runs: no worktree setup installs git hooks
+  or changes git config (`make hooks`, `git config`, `git lfs install`),
+  and each isolated dispatch's prompt says so.
 - **Where auto mode is on, keep worktrees under `.worktrees/`.** The
   harness's isolation option puts its worktrees under `.claude/worktrees/`,
   and Claude Code's auto mode treats everything under `.claude/` as agent
@@ -166,7 +170,10 @@ it is lost unless the prompt asks for it.
      by hand), go back to step 1, and run the gates again on the result.
 
   The landing tree is the one the gates run against, and an isolated
-  result that never lands there is not in what gets pushed.
+  result that never lands there is not in what gets pushed. Isolation
+  covers the tree, not the clone or the user: the steps above check what
+  a dispatch wrote to its tree, not git config, hooks or anything else its
+  shell could reach, and it was never a security boundary.
 - Escalate a model tier only on failure — a second red gate run, or a diff
   needing rewrite. Do not pre-empt.
 

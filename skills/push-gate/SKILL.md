@@ -41,8 +41,11 @@ HEAD and the report saying so. In doubt, the full gate.
 
 ## How it runs
 
-- On a clean tree (everything committed, no untracked files), so what it
-  verified is exactly what is pushed.
+- On a clean tree (everything committed, no untracked files), so the
+  tracked content the gate read is exactly what is pushed. A clean tree
+  covers neither ignored files (a virtualenv, a build cache) nor the git
+  config and hooks a clone's worktrees share: the green is this clone's,
+  not a fresh checkout's.
 - With a tool timeout long enough for the gate and for whatever the push
   hook runs. MUST NOT use `--no-verify`, a timed-out push included.
 - The invariant is that the pushed tip is green under the gate the
@@ -54,6 +57,21 @@ To learn what the hook runs, read the file
 `git rev-parse --git-path hooks/pre-push` names (it honours
 `core.hooksPath`), and what it invokes where a hook manager installed
 it.
+
+Where the hook skips a commit that one of the project's entry points
+recorded as passing the gate (the hook reads a record that entry point
+writes), and that entry point runs exactly the gate the rules require
+(read what it runs, as for the hook; a check the rules add on top still
+runs on its own), run the gate through it: one run, and the hook then
+skips the commit it recorded. The run is the evidence, not the skip.
+Commit nothing and write nothing to the tree between that run and the
+push. Where it passed but recorded nothing, the hook runs the gate
+again: let it, and report why the record was not made. Where the hook
+runs it although a record was made, the record stopped matching (HEAD
+moved or the tree changed): say which. Where the record was refused for
+something in the environment that can skip or deselect tests
+(`PYTEST_ADDOPTS`, say), the hook's run inherits it and neither run
+counts: clear it and run the gate again before pushing.
 
 Where the project's push hook runs more than its rules require (the full
 gate on a docs-only push), the agent cannot follow both. It runs the gate
@@ -78,4 +96,6 @@ record (ai-review's PR comment, say), or the end-of-turn text. It names:
 - why that gate: the rule it came from (file and section), "the project
   defines nothing narrower", or what made the class doubtful;
 - the change class and the diff range it was judged from;
-- any hook mismatch.
+- what the push hook did, where there is one: skipped the commit the
+  gate recorded, ran the gate again (and why), or ran more than the rules
+  require (the mismatch).
