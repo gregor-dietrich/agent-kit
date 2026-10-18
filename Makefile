@@ -19,4 +19,8 @@ test: install ## Run the test suite
 .PHONY: lint-shell
 lint-repo: lint-shell
 lint-shell: install ## shellcheck every tracked *.sh
+	@[ -x .venv/bin/shellcheck ] || { echo "lint-shell: no \
+	.venv/bin/shellcheck: either shellcheck-py has no wheel for this \
+	platform (see AGENTS.md, Gates), or .venv lost it (rm -rf .venv && make \
+	install)" >&2; exit 1; }
 	SHELLCHECK_OPTS= .venv/bin/shellcheck --norc -- $$(git ls-files '*.sh')

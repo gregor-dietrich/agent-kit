@@ -10,7 +10,7 @@ source = { virtual = "." }
 [package.dev-dependencies]
 dev = [
     { name = "pytest" },
-    { name = "shellcheck-py" },
+    { name = "shellcheck-py", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32') or sys_platform == 'darwin'" },
     { name = "uv" },
 ]
 
@@ -19,7 +19,7 @@ dev = [
 [package.metadata.requires-dev]
 dev = [
     { name = "pytest", specifier = ">=9.1.1" },
-    { name = "shellcheck-py", specifier = ">=0.11.0.1" },
+    { name = "shellcheck-py", marker = "(platform_machine == 'x86_64' and sys_platform == 'linux') or (platform_machine == 'AMD64' and sys_platform == 'win32') or sys_platform == 'darwin'", specifier = ">=0.11.0.1" },
     { name = "uv", specifier = ">=0.12.23" },
 ]
 

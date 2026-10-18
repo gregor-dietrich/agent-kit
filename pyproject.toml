@@ -8,12 +8,15 @@ dependencies = []
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
-    "shellcheck-py>=0.11.0.1",
+    # Only where it ships a wheel (uv.lock); never built, see below.
+    "shellcheck-py>=0.11.0.1; sys_platform == 'darwin' or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
     "uv>=0.12.23",
 ]
 
 [tool.uv]
 package = false
+# Its sdist build runs an unlocked backend that downloads the binary.
+no-build-package = ["shellcheck-py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -62,11 +62,26 @@ This repository opts in to that bridge for its own reviews:
   over the history and uncommitted changes, markdownlint), plus this
   project's `lint-shell`: shellcheck, pinned in `uv.lock`, over every
   tracked `*.sh`, hung on `lint-repo` as a prerequisite so both hooks
-  and CI run it. It ignores `SHELLCHECK_OPTS` and every `.shellcheckrc`,
-  so a local run judges what CI judges. Needs python3 3.11 or later,
-  node and npm, curl and tar, the network on first use, and everything
-  `make install` needs, because `lint-shell` syncs `.venv` first.
-  `.markdownlint.jsonc` holds this project's profile.
+  and CI run it; `tests/test_makefile.py` pins that prerequisite. It ignores
+  `SHELLCHECK_OPTS` and every `.shellcheckrc`, so a local run judges
+  what CI judges. Needs python3 3.11 or later, node and npm, curl and
+  tar, the network on first use, and everything `make install` needs,
+  because `lint-shell` syncs `.venv` first. `.markdownlint.jsonc` holds
+  this project's profile.
+- shellcheck-py ships wheels only for macOS, x86_64 glibc Linux and
+  x86_64 Windows, and its marker in `pyproject.toml` installs it only
+  there; `tests/test_lock_wheels.py` fails when the locked wheel set
+  changes. `no-build-package` keeps uv from building it from source, a
+  build that runs an unlocked backend and downloads the binary.
+  Elsewhere `make install` and `make test` work, but `lint-shell` fails,
+  saying so, and with it `make lint-repo`, `make gate` and both git
+  hooks (pre-push never reaches `test`); a shellcheck-py built from
+  source earlier is gone after the next `make install`. There, run
+  `make test` by hand, then commit and push with `--no-verify`: CI runs
+  the gate. An agent bound by the push-gate skill cannot, and hands the
+  push to its operator. In an arm64 container on a Mac, run the gates on
+  the host instead. x86_64 musl matches the marker but has no wheel, so
+  `make install` fails there (#48).
 - `make install` — syncs `.venv` exactly from `uv.lock`, removing
   anything installed into it by hand. It takes uv from PATH, then
   `.venv`, else bootstraps the pinned uv with `python3 -m venv` and pip;
