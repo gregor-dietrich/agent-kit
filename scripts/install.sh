@@ -3,7 +3,7 @@
 # neither has it, the version uv.lock pins is bootstrapped with pip into a
 # throwaway venv — never a curl|sh installer, never an unpinned uv.
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")/.."
+CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 if command -v uv >/dev/null 2>&1; then
 	uv=uv

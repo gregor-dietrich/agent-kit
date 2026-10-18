@@ -1,6 +1,6 @@
 # devkit's common.mk brings help, check, hooks, gate and the repository
 # gates (lint-repo). Its python-uv.mk is not included: install and test
-# stay this project's own.
+# stay this project's own, as is lint-shell.
 PROJECT := agent-kit
 DEVKIT := $(shell ./devkitw path)
 ifeq ($(DEVKIT),)
@@ -15,3 +15,8 @@ install: ## Sync .venv from uv.lock (bootstraps the pinned uv if missing)
 
 test: install ## Run the test suite
 	.venv/bin/pytest
+
+.PHONY: lint-shell
+lint-repo: lint-shell
+lint-shell: install ## shellcheck every tracked *.sh
+	SHELLCHECK_OPTS= .venv/bin/shellcheck --norc -- $$(git ls-files '*.sh')

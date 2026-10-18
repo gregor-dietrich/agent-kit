@@ -244,6 +244,33 @@ def test_verified_run_passes_the_pin_and_prints_the_message(
     assert not any(bridge.tmp.iterdir()), "temp dir left behind"
 
 
+def test_a_cdpath_cannot_redirect_the_kit_root(bridge: Bridge) -> None:
+    # Run by a relative path, the wrapper's `cd scripts/..` is the one
+    # operand bash resolves through CDPATH; a decoy kit must not win.
+    decoy = bridge.tmp.parent / "decoy"
+    (decoy / "scripts").mkdir(parents=True)
+    # The wrapper takes its project from the cwd, so the kit root is one.
+    subprocess.run(
+        ["git", "init", "-q", str(bridge.kit)], env=bridge.env, check=True
+    )
+    (bridge.kit / "AGENTS.md").write_text(f"{_OPT_IN}\n")
+    result = subprocess.run(
+        ["scripts/codex-agent.sh", "code-reviewer", bridge.prompt],
+        cwd=bridge.kit,
+        env={**bridge.env, "CDPATH": str(decoy)},
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    role_file = bridge.kit / "agents" / "code-reviewer.md"
+    assert f"instructions are in {role_file};" in (
+        bridge.fake / "stdin"
+    ).read_text()
+
+
 def test_the_captured_0_160_0_banner_parses_and_verifies(
     bridge: Bridge,
 ) -> None:

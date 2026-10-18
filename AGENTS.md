@@ -14,7 +14,7 @@ that can break silently.
 | `hooks/` | `hooks.json` (read by both clients), the guard scripts it registers, and `session-context.md`, the only text injected into every session |
 | `skills/` | One `<name>/SKILL.md` per skill, shared by both clients |
 | `agents/` | Generic role definitions (Claude Code only; Codex plugins carry no agents); code-reviewer's `codex-*` keys pin the Codex bridge |
-| `scripts/` | `install.sh`, the dev venv helper `make test` runs, and `codex-agent.sh`, the opt-in Codex bridge ai-review Stage 1c fires |
+| `scripts/` | `install.sh`, the dev venv helper `make install` runs, and `codex-agent.sh`, the opt-in Codex bridge ai-review Stage 1c fires |
 | `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here |
 | `devkitw`, `devkit.toml` | devkit's wrapper, copied verbatim from the pinned tag and never edited, and its pin |
 
@@ -45,18 +45,31 @@ that can break silently.
   `AGENTS.md`. The exception is devkit, whose pin and wrapper the build
   needs.
 - Python and Markdown are hard-wrapped at 80 columns.
+- Tracked `*.sh` scripts pass shellcheck; a `disable` directive carries
+  its reason. `devkitw` is exempt: it is vendored verbatim and
+  shellchecked upstream.
 
 ## Gates
 
 - Every `make` target first runs `./devkitw`, which fetches the pinned
   devkit once per pin (forge access needed then); CI fetches it with the
   `DEVKIT_TOKEN` secret.
-- `make lint-repo` — devkit's repository gates: action pins, gitleaks
-  over the history and uncommitted changes, and markdownlint. Needs
-  python3 3.11 or later, node and npm, curl and tar, and the network on
-  first use. `.markdownlint.jsonc` holds this project's profile.
-- `make test` — syncs `.venv` from `uv.lock` (bootstrapping the pinned
-  uv when none is found) and runs pytest. CI runs both targets.
+- `make lint-repo` — devkit's repository gates (action pins, gitleaks
+  over the history and uncommitted changes, markdownlint), plus this
+  project's `lint-shell`: shellcheck, pinned in `uv.lock`, over every
+  tracked `*.sh`, hung on `lint-repo` as a prerequisite so both hooks
+  and CI run it. It ignores `SHELLCHECK_OPTS` and every `.shellcheckrc`,
+  so a local run judges what CI judges. Needs python3 3.11 or later,
+  node and npm, curl and tar, the network on first use, and everything
+  `make install` needs, because `lint-shell` syncs `.venv` first.
+  `.markdownlint.jsonc` holds this project's profile.
+- `make install` — syncs `.venv` exactly from `uv.lock`, removing
+  anything installed into it by hand. It takes uv from PATH, then
+  `.venv`, else bootstraps the pinned uv with `python3 -m venv` and pip;
+  uv fetches CPython 3.13 when none is found. `make test` and
+  `make lint-repo` both run it first.
+- `make test` — runs pytest after `make install`. CI runs `lint-repo`
+  and `test`.
 - `make hooks` once per clone: `pre-commit` runs `make lint-repo`,
   `pre-push` `make lint-repo test`.
 - `claude plugin validate .` — after any manifest, hook, skill or agent

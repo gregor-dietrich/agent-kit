@@ -95,7 +95,7 @@ ROLE="$1"
 PROMPT_FILE="$2"
 TRANSCRIPT="${3:-}"
 
-KIT="$(CDPATH= cd -L -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -L)"
+KIT="$(CDPATH='' cd -L -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -L)"
 ROLE_FILE="$KIT/agents/$ROLE.md"
 
 # Validated before the existence check, so no name walks out of agents/.
