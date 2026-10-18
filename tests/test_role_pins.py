@@ -104,6 +104,27 @@ def test_each_dispatching_skill_points_at_the_pin_contract(
     assert marker in text
 
 
+@pytest.mark.parametrize(
+    ("path", "anchor"),
+    [
+        (
+            "skills/delegation/SKILL.md",
+            "a branch must not choose its own reviewer",
+        ),
+        (
+            "skills/ai-review/SKILL.md",
+            "a branch must not grant its own consent",
+        ),
+        ("hooks/session-context.md", "reviewer this checkout changed"),
+    ],
+)
+def test_the_checkout_cannot_choose_its_own_reviewer(
+    path: str, anchor: str
+) -> None:
+    text = " ".join((_ROOT / path).read_text(encoding="utf-8").split())
+    assert anchor in text
+
+
 def test_no_skill_calls_the_model_pin_the_source_of_truth() -> None:
     hits = [
         f"{path.relative_to(_ROOT)}:{number}"

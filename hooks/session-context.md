@@ -1,5 +1,5 @@
 agent-kit is installed. Four rules from its `agent-kit:delegation` skill
-apply whenever you dispatch subagents (read the skill before any dispatch):
+apply whenever you dispatch subagents (read it first):
 
 - Dispatch only pinned agent types (`agent-kit:scout`,
   `agent-kit:code-reviewer`, `agent-kit:software-architect`,
@@ -7,9 +7,10 @@ apply whenever you dispatch subagents (read the skill before any dispatch):
   pin of the client you run in: Claude Code's `model:`, Codex's
   `codex-model` and `codex-effort`. Where the project defines its own
   pinned agent, or its own skill, for the same role, use the project's
-  instead. A dispatch with no pin (general-purpose, built-in
-  `Explore`/`Plan`) silently inherits the steering model: never rely on
-  it; where a harness workflow forces one, pass the closest role's pin.
+  instead (not a reviewer this checkout changed). A dispatch with no pin
+  (general-purpose, built-in `Explore`/`Plan`) inherits the steering
+  model: never rely on it; where a harness workflow forces one, pass the
+  closest role's pin.
 - Read every returned diff before it lands. Subagents never commit and
   never re-delegate.
 - A small edit whose closed spec would outweigh its diff stays in the

@@ -41,7 +41,7 @@ setup that grows the way the original did.**
 | `skills/push-gate` | Which gate a push owes, and how it runs | Any repository; narrower gates come from the project's rules |
 | `skills/ai-review` | Multi-agent review with pinned agents, stance-split verification and no finding cap | Any repository; risk paths can be named in the project's `AGENTS.md` |
 | `agents/*` | scout, code-reviewer, software-architect, backend-developer, frontend-developer | Claude Code runs them as agent types, Codex spawns them on their `codex-model` and `codex-effort`; each reads the project's own docs before acting |
-| `scripts/codex-agent.sh` | Pinned Codex dispatch for ai-review Stage 1c | Opt-in per project via a `<!-- agent-kit:codex-bridge -->` line; needs codex-cli 0.160.0 or later |
+| `scripts/codex-agent.sh` | Pinned Codex dispatch for ai-review Stage 1c | Opt-in per user via the file `~/.config/agent-kit/codex-bridge`; needs codex-cli 0.160.0 or later |
 
 ### The one that matters most
 
@@ -106,12 +106,19 @@ reasoning effort and sandbox from the `codex-*` keys in
 It sends the review prompt (the diff, the PR and issue threads, the
 context digest) to a second vendor, plus any file codex chooses to read,
 and the preamble itself points it at files outside the project. So it
-runs only where the project's root `AGENTS.md` carries the line
-`<!-- agent-kit:codex-bridge -->`, on its own; a project that names its
-own bridge keeps it. The bridge needs codex-cli 0.160.0 or later and
-passes `--ignore-user-config`: your `$CODEX_HOME/config.toml` is not
-loaded, so a custom provider or proxy setup cannot be used with it, while
-auth still comes from `CODEX_HOME`.
+runs only once you opt in, once for every project:
+
+```sh
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit"
+touch "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit/codex-bridge"
+```
+
+The file lives outside every checkout, so no branch can opt you in. A
+project that names its own bridge keeps it, unless the checkout changes
+that bridge. The bridge needs codex-cli 0.160.0 or later and passes
+`--ignore-user-config`: your `$CODEX_HOME/config.toml` is not loaded, so
+a custom provider or proxy setup cannot be used with it, while auth still
+comes from `CODEX_HOME`.
 
 ## Warning: a broken hook is a silent hook
 

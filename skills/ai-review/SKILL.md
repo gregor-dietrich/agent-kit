@@ -34,8 +34,8 @@ replaces it end to end.
   `agent-kit:frontend-developer`, …, or the project's own type for the
   same role, which takes precedence here and wherever a stage below names
   an agent-kit type: `agent-kit:delegation`, "The policy"), except an
-  optional Stage 1c cross-family bridge the project provides or opts
-  into. The pin is the one for the client you run in
+  optional Stage 1c cross-family bridge the project provides or the user
+  opts into. The pin is the one for the client you run in
   (`agent-kit:delegation`, "Pins by client") — **read it** from the
   agent's definition, do not recall it from memory or from this skill.
 - General-purpose (unpinned) dispatches are **FORBIDDEN** in this
@@ -350,11 +350,15 @@ order:
 
 - the project's `AGENTS.md` names its own pinned cross-family bridge —
   e.g. a wrapper that runs a pinned Codex agent and verifies the pin
-  took. That one takes precedence, as the project's own agent types do;
-- otherwise, its root `AGENTS.md` carries the opt-in as a line of its
-  own, exactly `<!-- agent-kit:codex-bridge -->`. When the diff under
-  review touches that root `AGENTS.md`, get the operator's explicit
-  confirmation first: a branch must not grant its own consent. Run
+  took. That one takes precedence, as the project's own agent types do,
+  and on their terms: one the checkout adds or changes runs only once the
+  operator confirms it (`agent-kit:delegation`, "The policy");
+  unconfirmed, fall through to the opt-in below;
+- otherwise, agent-kit's bridge, where the user has opted in by creating
+  the file `${XDG_CONFIG_HOME:-~/.config}/agent-kit/codex-bridge`. The
+  opt-in is the user's, once for every project, and lives outside every
+  checkout: a branch must not grant its own consent. The bridge checks
+  the file itself and exits 2 without it. Run
   `<base>/../../scripts/codex-agent.sh code-reviewer <prompt-file>
   <transcript-file>` from inside the project with the Bash tool's
   `run_in_background` (a foreground call is capped at 10 minutes),

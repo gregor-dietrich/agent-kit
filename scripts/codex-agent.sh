@@ -26,11 +26,12 @@
 # The user's own provider and MCP servers are left out with it; auth still
 # comes from CODEX_HOME.
 #
-# A project opts in with a line reading exactly
-# `<!-- agent-kit:codex-bridge -->` in its root AGENTS.md, a regular file
-# and not a symlink. Without it, codex is never called: the line is the
-# project's consent to send the review prompt, and whatever codex chooses
-# to read, to a second vendor.
+# The user opts in, once for every project, by creating the file
+# ${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit/codex-bridge; its content is
+# not read. Without it, codex is never called: the file is the user's
+# consent to send the review prompt, and whatever codex chooses to read,
+# to a second vendor. It lives outside every checkout, so no branch can
+# grant it.
 #
 # The banner and token formats parsed below were read on codex-cli
 # 0.147.0, 0.159.2 and 0.160.0; everything else relied on here,
@@ -56,7 +57,7 @@
 #
 # Exit status:
 #   0    the run finished, the banner verified the pin, codex answered
-#   2    usage error, failed precondition, project not opted in, or a pin
+#   2    usage error, failed precondition, user not opted in, or a pin
 #        key missing or malformed in the role file; codex did not run
 #   3    the pin could not be verified (banner absent or mismatched), or
 #        codex returned no answer: discard the run
@@ -76,7 +77,7 @@
 set -euo pipefail
 
 USAGE='usage: codex-agent.sh <role> <prompt-file> [<transcript-file>]'
-OPT_IN='<!-- agent-kit:codex-bridge -->'
+OPT_IN="${XDG_CONFIG_HOME:-${HOME:-}/.config}/agent-kit/codex-bridge"
 MIN_VERSION='0.160.0'
 # Not the role's to choose: the vendor this bridge crosses to, and a
 # headless run that never stops to ask.
@@ -127,14 +128,9 @@ fi
 ROOT="$(git rev-parse --show-toplevel 2> /dev/null)" ||
 	die 'not inside a git repository; run from the target project.'
 
-# The whole line, so prose that names the token, or a variant of it, does
-# not consent; a symlink could point the check at a file nobody reviews.
-AGENTS_MD="$ROOT/AGENTS.md"
-if [[ -L "$AGENTS_MD" || ! -f "$AGENTS_MD" ]] ||
-	! grep -qxF -e "$OPT_IN" -e "$OPT_IN"$'\r' -- "$AGENTS_MD"; then
-	die "project not opted in: $AGENTS_MD has no line $OPT_IN" \
-		'(a regular file, the line on its own). Codex was not called.'
-fi
+[[ -f "$OPT_IN" ]] ||
+	die "not opted in: $OPT_IN does not exist. Codex was not called." \
+		'Create that file to let every project send reviews to Codex.'
 
 FIRST_LINE=""
 IFS= read -r FIRST_LINE < "$ROLE_FILE" || true

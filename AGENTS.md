@@ -18,10 +18,6 @@ that can break silently.
 | `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here |
 | `devkitw`, `devkit.toml` | devkit's wrapper, copied verbatim from the pinned tag and never edited, and its pin |
 
-This repository opts in to that bridge for its own reviews:
-
-<!-- agent-kit:codex-bridge -->
-
 ## Rules
 
 - **No hook — and no script a skill fires — ships without its tests.**

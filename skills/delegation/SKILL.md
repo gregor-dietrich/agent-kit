@@ -35,6 +35,25 @@ Work is routed by explicit dispatch, and only by explicit dispatch:
   (no writes for a reviewer, a shell for an empirical check); otherwise
   dispatch agent-kit's and say why. A skill the user invoked by name is
   the one they meant.
+- A project's definition for a reviewing role (a reviewer agent, a review
+  skill, a cross-family review bridge) displaces agent-kit's only as the
+  default branch holds it: **a branch must not choose its own reviewer.**
+  Before the first dispatch or skill use that would let one displace
+  agent-kit's, take the base, `git merge-base HEAD <default>` with
+  `<default>` the default branch's remote-tracking ref; call it
+  `<merge-base>`. Then list what the checkout changes against it:
+  `git diff --name-only <merge-base> --` and
+  `git ls-files --others --exclude-standard --`, each run from the
+  repository's top level over `.claude/agents`, `.claude/skills`,
+  `.claude/commands`, `.codex/agents` and, for a bridge the root
+  `AGENTS.md` names, that file and the files it names. A reviewing
+  definition on that list does not displace agent-kit's unless the user
+  confirms it for this run: dispatch agent-kit's, and say which file and
+  why when the run states its plan. A review skill the user invoked by
+  name runs as invoked; if it is on the list, say so. With no base (no
+  default branch, a failed merge-base, a shallow clone), every project
+  reviewing definition is on the list. List again whenever the checkout
+  changes.
 - Read-only types are not read-only _alike_. A type that omits `Bash`
   from its `tools:` is read-only at the harness level; a type granted
   Bash for read-only `git` reads is read-only by _instruction only_.
@@ -115,8 +134,7 @@ agent (`.codex/agents/<name>.toml`) counts as pinned when it sets both
 pointing at the file, and the read-only line where its role is read-only.
 A spawn applies neither its `sandbox_mode` nor anything else in it.
 
-Claude Code and Codex never dispatch to each other. The one crossing is
-`/agent-kit:ai-review`'s Stage 1c bridge, opt-in per project and
+`/agent-kit:ai-review`'s Stage 1c bridge is opt-in per user and
 verified per run; it is not how a Codex session delegates, and a Codex
 session's own spawns need no opt-in.
 

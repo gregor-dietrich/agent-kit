@@ -36,7 +36,7 @@ _PIN = {
     "codex-effort": "high",
     "codex-sandbox": "read-only",
 }
-_OPT_IN = "<!-- agent-kit:codex-bridge -->"
+_MARKER = "<!-- agent-kit:codex-bridge -->"
 _MESSAGE = "the final message\n"
 _PROMPT = "Review the diff.\n"
 
@@ -186,7 +186,9 @@ def bridge(tmp_path: Path) -> Bridge:
     shutil.copy2(_SCRIPT, kit / "scripts" / _SCRIPT.name)
     (kit / "agents" / "code-reviewer.md").write_text(_role(dict(_PIN)))
 
-    (tmp_path / "home").mkdir()
+    opt_in = tmp_path / "home" / ".config" / "agent-kit" / "codex-bridge"
+    opt_in.parent.mkdir(parents=True)
+    opt_in.touch()
     (tmp_path / "tmp").mkdir()
     env = {
         "PATH": f"{fake_bin}{os.pathsep}{tools}",
@@ -204,7 +206,6 @@ def bridge(tmp_path: Path) -> Bridge:
         check=True,
         timeout=30,
     )
-    (project / "AGENTS.md").write_text(f"# Project\n\n{_OPT_IN}\n")
     (project / "prompt.md").write_text(_PROMPT)
     return Bridge(kit, project, fake, tmp_path / "tmp", env)
 
@@ -253,7 +254,6 @@ def test_a_cdpath_cannot_redirect_the_kit_root(bridge: Bridge) -> None:
     subprocess.run(
         ["git", "init", "-q", str(bridge.kit)], env=bridge.env, check=True
     )
-    (bridge.kit / "AGENTS.md").write_text(f"{_OPT_IN}\n")
     result = subprocess.run(
         ["scripts/codex-agent.sh", "code-reviewer", bridge.prompt],
         cwd=bridge.kit,
@@ -545,53 +545,43 @@ def test_no_token_marker_is_reported_and_does_not_fail(
 # --- refusals: codex is never called ------------------------------------
 
 
-@pytest.mark.parametrize(
-    "agents_md",
-    [
-        None,
-        "# Project\n\nNo bridge here.\n",
-        "Never add agent-kit:codex-bridge here.\n",
-        "<!-- agent-kit:codex-bridge-disabled -->\n",
-        f"Opted in: {_OPT_IN}\n",
-        f" {_OPT_IN}\n",
-    ],
-)
-def test_a_project_not_opted_in_is_refused(
-    bridge: Bridge, agents_md: str | None
-) -> None:
-    target = bridge.project / "AGENTS.md"
-    if agents_md is None:
-        target.unlink()
-    else:
-        target.write_text(agents_md)
+def _opt_in(bridge: Bridge) -> Path:
+    return Path(bridge.env["HOME"]) / ".config" / "agent-kit" / "codex-bridge"
+
+
+def test_a_user_not_opted_in_is_refused(bridge: Bridge) -> None:
+    _opt_in(bridge).unlink()
     result = bridge.run()
     assert result.returncode == 2
-    assert _OPT_IN in result.stderr
-    assert str(target) in result.stderr
+    assert f"not opted in: {_opt_in(bridge)}" in result.stderr
     assert bridge.calls == []
 
 
-def test_a_symlinked_agents_md_does_not_opt_in(bridge: Bridge) -> None:
-    target = bridge.project / "AGENTS.md"
-    elsewhere = bridge.project.parent / "AGENTS.md"
-    target.rename(elsewhere)
-    target.symlink_to(elsewhere)
+def test_a_project_marker_does_not_opt_in(bridge: Bridge) -> None:
+    # The old per-project line: a branch could add it to grant its own
+    # consent, so it grants none.
+    _opt_in(bridge).unlink()
+    (bridge.project / "AGENTS.md").write_text(f"# Project\n\n{_MARKER}\n")
     result = bridge.run()
     assert result.returncode == 2
     assert "not opted in" in result.stderr
     assert bridge.calls == []
 
 
-@pytest.mark.parametrize(
-    "agents_md",
-    [f"# P\n\n{_OPT_IN}\n", f"# P\r\n\r\n{_OPT_IN}\r\n", f"# P\n{_OPT_IN}"],
-)
-def test_the_exact_opt_in_line_is_accepted(
-    bridge: Bridge, agents_md: str
-) -> None:
-    (bridge.project / "AGENTS.md").write_bytes(agents_md.encode())
-    result = bridge.run()
+def test_xdg_config_home_holds_the_opt_in(bridge: Bridge) -> None:
+    _opt_in(bridge).unlink()
+    xdg = bridge.tmp.parent / "xdg"
+    (xdg / "agent-kit").mkdir(parents=True)
+    (xdg / "agent-kit" / "codex-bridge").touch()
+    result = bridge.run(XDG_CONFIG_HOME=str(xdg))
     assert result.returncode == 0, result.stderr
+
+
+def test_xdg_config_home_replaces_the_home_default(bridge: Bridge) -> None:
+    result = bridge.run(XDG_CONFIG_HOME=str(bridge.tmp.parent / "empty"))
+    assert result.returncode == 2
+    assert "not opted in" in result.stderr
+    assert bridge.calls == []
 
 
 def test_outside_a_git_repository_is_refused(bridge: Bridge) -> None:
