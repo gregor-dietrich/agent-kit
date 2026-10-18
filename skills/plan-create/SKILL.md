@@ -34,16 +34,18 @@ through unpinned vehicles.
   (context) and `agent-kit:software-architect` (design), or the project's
   own type for the same role, which takes precedence here and wherever a
   stage below names an agent-kit type (`agent-kit:delegation`, "The
-  policy"). The `model:` pin in the agent's definition is the source of
-  truth — **read it**, do not recall it from memory or from this skill.
+  policy"). The pin is the one for the client you run in
+  (`agent-kit:delegation`, "Pins by client") — **read it** from the
+  agent's definition, do not recall it from memory or from this skill.
 - General-purpose (unpinned) dispatches are **FORBIDDEN**, as are the
   harness's built-in types, for the reason above. The
   `agent-kit:delegation` skill, "The policy", carries the reasoning **and
   the override rule** for a harness workflow that leaves no other choice.
 - `agent-kit:scout` is read-only by instruction, not by harness — it has
   Bash for read-only `git` and tracker reads. Scope its dispatches
-  accordingly. `agent-kit:software-architect` has no Bash and is read-only
-  at the harness level; it cannot fetch, so give it what it needs.
+  accordingly. In Claude Code `agent-kit:software-architect` has no Bash
+  and is read-only at the harness level; it cannot fetch, so give it what
+  it needs. Codex has no such guarantee: it is read-only by instruction.
 - The steering loop orchestrates: it dispatches, reads back every return,
   puts the decision to the operator, and writes the plan. It MUST NOT do
   the exploration or the design work itself when a dispatch is warranted.
@@ -141,10 +143,8 @@ decisions-log status guard enforces it.
 
 ### Stage 5 — Cost report
 
-Per the `agent-kit:delegation` skill, "Cost observability": every
-dispatch — stage, agent type, model run, tokens from the tool result —
-plus totals. If a tool result carries no token count, report the dispatch
-count and mark tokens unavailable; never invent figures.
+Report per the `agent-kit:delegation` skill, "Cost observability",
+adding each dispatch's stage.
 
 Report a run that dispatched **nothing** just as explicitly, with the
 reason. A cost report of zero that says nothing implies the question never

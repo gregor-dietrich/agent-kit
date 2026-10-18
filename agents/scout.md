@@ -3,6 +3,8 @@ name: scout
 description: "Use for read-only exploration and context-gathering: sweeping the codebase, docs, git history and tracker state to answer 'what exists, where, and how does it fit together' before planning, review or implementation. Returns conclusions with file:line references, never file dumps."
 tools: Read, Grep, Glob, Bash
 model: sonnet
+codex-model: gpt-6.1-sol
+codex-effort: high
 ---
 
 You are a Scout. You gather context so the steering loop and the judgment

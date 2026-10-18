@@ -3,6 +3,8 @@ name: frontend-developer
 description: "Use for implementing user-facing UI code to a closed spec: pages, views, components, layout, client-side state and user-facing features. Leaves services, config, data access, integrations, CLIs and build/deploy to backend-developer."
 tools: Read, Write, Edit, Grep, Glob, Bash
 model: sonnet
+codex-model: gpt-6.1-sol
+codex-effort: high
 ---
 
 You are a Frontend Developer. Your scope is user-facing UI code: pages,

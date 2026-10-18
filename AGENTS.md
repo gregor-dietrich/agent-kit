@@ -13,7 +13,7 @@ that can break silently.
 | `.codex-plugin/plugin.json` | The Codex twin: same name and version, plus Codex's `interface` block |
 | `hooks/` | `hooks.json` (read by both clients), the guard scripts it registers, and `session-context.md`, the only text injected into every session |
 | `skills/` | One `<name>/SKILL.md` per skill, shared by both clients |
-| `agents/` | Generic role definitions (Claude Code only; Codex plugins carry no agents); code-reviewer's `codex-*` keys pin the Codex bridge |
+| `agents/` | Generic role definitions; each pins its model per client in its frontmatter: `model:` for Claude Code, which runs them as agent types, `codex-model` and `codex-effort` for Codex, whose steering loop spawns them (delegation skill, "Pins by client"). code-reviewer's `codex-sandbox` is the review bridge's alone. |
 | `scripts/` | `install.sh`, the dev venv helper `make install` runs, and `codex-agent.sh`, the opt-in Codex bridge ai-review Stage 1c fires |
 | `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here |
 | `devkitw`, `devkit.toml` | devkit's wrapper, copied verbatim from the pinned tag and never edited, and its pin |

@@ -291,6 +291,27 @@ def test_the_captured_0_160_0_banner_parses_and_verifies(
     assert "tokens used (normalised): 2990" in result.stderr
 
 
+def test_the_shipped_code_reviewer_pin_reaches_codex_and_verifies(
+    bridge: Bridge,
+) -> None:
+    shipped = _ROOT / "agents" / "code-reviewer.md"
+    shutil.copy2(shipped, bridge.kit / "agents")
+    pin = dict(
+        line.split(": ", 1)
+        for line in shipped.read_text().splitlines()
+        if line.startswith("codex-")
+    )
+    bridge.stderr(
+        _banner(pin["codex-model"], pin["codex-effort"], pin["codex-sandbox"])
+    )
+    result = bridge.run()
+    assert result.returncode == 0, result.stderr
+    pairs = list(zip(bridge.argv, bridge.argv[1:]))
+    assert ("-m", pin["codex-model"]) in pairs
+    assert ("-c", f"model_reasoning_effort={pin['codex-effort']}") in pairs
+    assert ("--sandbox", pin["codex-sandbox"]) in pairs
+
+
 def test_transcript_receives_codex_stderr_privately(bridge: Bridge) -> None:
     transcript = bridge.project.parent / "transcript.log"
     result = bridge.run(["code-reviewer", bridge.prompt, str(transcript)])
@@ -743,16 +764,23 @@ def test_a_bad_timeout_is_refused(bridge: Bridge, value: str) -> None:
 # --- the shipped pin and the skill's path to it -------------------------
 
 
-def test_the_shipped_code_reviewer_carries_a_read_only_pin() -> None:
-    lines = (_ROOT / "agents" / "code-reviewer.md").read_text().splitlines()
-    assert lines[0] == "---"
-    frontmatter = lines[1 : lines.index("---", 1)]
-    pin = dict(
-        line.split(": ", 1) for line in frontmatter if line.startswith("codex-")
-    )
-    assert set(pin) == set(_PIN)
-    assert all(value.strip() for value in pin.values())
-    assert pin["codex-sandbox"] == "read-only"
+@pytest.mark.parametrize(
+    "name",
+    sorted(
+        p.stem
+        for p in (_ROOT / "agents").glob("*.md")
+        if p.stem != "code-reviewer"
+    ),
+)
+def test_the_bridge_refuses_every_shipped_role_without_a_sandbox_pin(
+    bridge: Bridge, name: str
+) -> None:
+    shutil.copy2(_ROOT / "agents" / f"{name}.md", bridge.kit / "agents")
+    result = bridge.run([name, bridge.prompt])
+    assert result.returncode == 2
+    assert "carry a sandbox pin" in result.stderr
+    assert "missing or empty" not in result.stderr
+    assert bridge.calls == []
 
 
 def test_the_skill_reaches_the_shipped_bridge() -> None:

@@ -3,6 +3,8 @@ name: backend-developer
 description: "Use for implementing non-UI code to a closed spec: services and business logic, configuration, data access, integrations with external systems, CLIs, and build and deploy configuration. Leaves user-facing UI code to frontend-developer."
 tools: Read, Write, Edit, Grep, Glob, Bash
 model: sonnet
+codex-model: gpt-6.1-sol
+codex-effort: high
 ---
 
 You are a Backend Developer. Your scope is everything that is not

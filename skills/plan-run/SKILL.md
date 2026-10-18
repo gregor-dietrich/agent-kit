@@ -35,9 +35,10 @@ from that rather than justifying it.
   `agent-kit:software-architect` (read-only judgment) where a return needs
   vetting, or the project's own type for the same role, which takes
   precedence here and wherever a stage below names an agent-kit type
-  (`agent-kit:delegation`, "The policy"). The `model:` pin in the agent's
-  definition is the source of truth — **read it**, do not recall it from
-  memory or from this skill.
+  (`agent-kit:delegation`, "The policy"). The pin is the one for the
+  client you run in (`agent-kit:delegation`, "Pins by client") — **read
+  it** from the agent's definition, do not recall it from memory or from
+  this skill.
 - General-purpose (unpinned) dispatches are **FORBIDDEN**, as are the
   harness's built-in agent types: neither carries a `model:` pin, so a
   bare dispatch silently inherits the steering model. That looks like
@@ -124,8 +125,9 @@ it is lost unless the prompt asks for it.
   one is the hook every push runs: no worktree setup installs git hooks
   or changes git config (`make hooks`, `git config`, `git lfs install`),
   and each isolated dispatch's prompt says so.
-- **Where auto mode is on, keep worktrees under `.worktrees/`.** The
-  harness's isolation option puts its worktrees under `.claude/worktrees/`,
+- **Where auto mode is on, or the harness offers no isolation option,
+  keep worktrees under `.worktrees/`.** The harness's isolation option
+  puts its worktrees under `.claude/worktrees/`,
   and Claude Code's auto mode treats everything under `.claude/` as agent
   configuration: it refuses Edit, Write and some Read calls there with
   "The user doesn't want to take this action right now", which reads like
@@ -250,10 +252,8 @@ description's closing-keyword line.
 
 ### Stage 5 — Cost report
 
-Per the `agent-kit:delegation` skill, "Cost observability": every
-dispatch — stage, agent type, model run, tokens from the tool result —
-plus totals. If a tool result carries no token count, report the dispatch
-count and mark tokens unavailable; never invent figures.
+Report per the `agent-kit:delegation` skill, "Cost observability",
+adding each dispatch's stage.
 
 State explicitly which work items stayed in the steering loop and why. A
 run that dispatched nothing reports that with its reason: a cost report of

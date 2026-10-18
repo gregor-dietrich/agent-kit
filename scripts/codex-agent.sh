@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Dispatch one agent-kit role to Codex headlessly, pinned, and prove
-# afterwards that the pin actually took.
+# Dispatch one agent-kit role that carries a bridge sandbox pin to Codex
+# headlessly, pinned, and prove afterwards that the pin actually took.
 #
 # `codex exec` has NO agent selector: no `--agent` flag picks a role with
 # its model, reasoning effort and sandbox. A hand-built call has to spell
@@ -46,12 +46,13 @@
 #
 # Run from anywhere inside the target project; its git top level is the
 # directory codex works in. <role> names agents/<role>.md beside this
-# script. <prompt-file> holds the dispatch prompt; a fixed read-only
-# preamble pointing codex at the role file goes before it. The final
-# message of a verified run is printed on stdout; this wrapper's own
-# status lines go to stderr. <transcript-file>, a path that must not exist
-# yet, keeps codex's stderr, and an ERROR raised after codex ran names it;
-# without one, codex's stderr is deleted with the run.
+# script, and must carry a `codex-sandbox` pin: a role without one is not
+# a bridge role and is refused. <prompt-file> holds the dispatch prompt;
+# a fixed read-only preamble pointing codex at the role file goes before
+# it. The final message of a verified run is printed on stdout; this
+# wrapper's own status lines go to stderr. <transcript-file>, a path that
+# must not exist yet, keeps codex's stderr, and an ERROR raised after
+# codex ran names it; without one, codex's stderr is deleted with the run.
 #
 # Exit status:
 #   0    the run finished, the banner verified the pin, codex answered
@@ -144,15 +145,20 @@ IFS= read -r FIRST_LINE < "$ROLE_FILE" || true
 # A value is passed to codex verbatim, so a quoted or commented one is
 # refused here rather than after a billed run fails to verify.
 pin() {
-	local value
-	value="$(awk -v key="$1" '
+	local found value
+	found="$(awk -v key="$1" '
 		/^---[ \t\r]*$/ { if (++rules == 2) exit; next }
 		rules == 1 && index($0, key ":") == 1 {
 			value = substr($0, length(key) + 2)
 			gsub(/^[ \t]+|[ \t\r]+$/, "", value)
-			print value
+			print "=" value
 			exit
 		}' "$ROLE_FILE")"
+	if [[ -z "$found" && "$1" == codex-sandbox ]]; then
+		die "$ROLE_FILE has no codex-sandbox key: the bridge runs only" \
+			'roles that carry a sandbox pin, and this role has none.'
+	fi
+	value="${found#=}"
 	[[ -n "$value" ]] ||
 		die "$ROLE_FILE: frontmatter key $1 missing or empty."
 	[[ "$value" != *[\"\'#[:space:]]* ]] ||

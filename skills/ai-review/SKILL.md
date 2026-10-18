@@ -35,9 +35,9 @@ replaces it end to end.
   same role, which takes precedence here and wherever a stage below names
   an agent-kit type: `agent-kit:delegation`, "The policy"), except an
   optional Stage 1c cross-family bridge the project provides or opts
-  into. The `model:` pin in the agent definition's frontmatter is the
-  source of truth — **read it**, do not recall it from memory or from
-  this skill.
+  into. The pin is the one for the client you run in
+  (`agent-kit:delegation`, "Pins by client") — **read it** from the
+  agent's definition, do not recall it from memory or from this skill.
 - General-purpose (unpinned) dispatches are **FORBIDDEN** in this
   workflow — that is the exact defect this skill exists to route around.
   The harness's built-in agent types (`Explore`, `Plan`, …) are **equally
@@ -158,14 +158,15 @@ fan-out.
 
 ### The empirical trigger — orthogonal to the mode
 
-`agent-kit:code-reviewer` has no shell, so it can only ever reason about
-code, never run it. For an ordinary diff that costs nothing: the project's
-test suite already executes the change, and a second empirical arm buys a
-duplicate. The exception is a diff whose code the suite does **not**
-itself execute, or whose correctness rests on a contract outside the
-repository. There, a static reviewer's highest-severity findings are
-exactly the ones it cannot settle, and it will report them at full
-confidence anyway.
+In Claude Code `agent-kit:code-reviewer` has no shell, so it can only
+ever reason about code, never run it; under Codex it has a shell but is
+forbidden builds and tests, so the same holds. For an ordinary diff that
+costs nothing: the project's test suite already executes the change, and
+a second empirical arm buys a duplicate. The exception is a diff whose
+code the suite does **not** itself execute, or whose correctness rests
+on a contract outside the repository. There, a static reviewer's
+highest-severity findings are exactly the ones it cannot settle, and it
+will report them at full confidence anyway.
 
 Fire **Stage 1b** when either holds:
 
@@ -242,10 +243,11 @@ Write the **full artifacts** to scratchpad files — the complete `git diff`
 for the scope and the complete issue/comment threads — and pass those file
 paths into every Stage 1/2 reviewer prompt, alongside a short **context
 digest** (a few sentences: what the change is for, which issues it closes,
-which decisions bear on it). Reviewers are read-only (no shell, no
-tracker): they Read the artifact files themselves, so their scope and
-tracker context stay lossless instead of anchored to the orchestrator's
-summary — and they never re-fetch.
+which decisions bear on it). Reviewers are read-only (in Claude Code no
+shell, no tracker; under Codex the Stage 1 and Stage 2 reviewer prompts
+also carry Stage 1b's list): they Read the artifact files themselves, so
+their scope and tracker context stay lossless instead of anchored to the
+orchestrator's summary — and they never re-fetch.
 
 ### Stage 1 — Review fan-out (`agent-kit:code-reviewer`)
 
@@ -365,7 +367,10 @@ order:
   exit (3, 124, 137, codex's own status) it ran and billed: record the
   dispatch and the tokens the bridge reports in Stage 5. The bridge is a
   cross-family arm only from a Claude Code steering session; a Codex
-  steering loop gets none from it.
+  steering loop gets none from it. From a Codex steering session, Stage
+  1's dispatches are already Codex spawns on their Codex pins
+  (`agent-kit:delegation`, "Pins by client"): native work, not this
+  stage.
 
 Every dispatch above runs on one model family. Correlated blind spots
 survive that unanimously, and five same-family reviewers agreeing is
@@ -530,12 +535,10 @@ produces; this stage runs only then.
 
 ### Stage 5 — Cost report (every run, all modes)
 
-A table of every dispatch made — stage, agent type, model run, tokens
-consumed (read from each `Agent` tool result) — plus totals: agents
-spawned and tokens consumed. If a tool result does not surface a token
-count, report the dispatch count and mark tokens as **unavailable** —
-never invent figures (see the `agent-kit:delegation` skill, "Cost
-observability"). State explicitly when Stage 2 was skipped (`quick`).
+A table of every dispatch made — stage, then the fields the
+`agent-kit:delegation` skill, "Cost observability", names — plus totals:
+agents spawned and tokens consumed. State explicitly when Stage 2 was
+skipped (`quick`).
 
 When the run was invoked as `auto`, record the resolved mode and the
 escalators that fired (or that none did) — that line is the only durable
