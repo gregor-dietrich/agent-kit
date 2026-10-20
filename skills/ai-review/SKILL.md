@@ -318,6 +318,21 @@ carry, in its own words:
   the repo**, and `git status --porcelain` reported at the end to prove it;
 - no `git` write commands, no mutating build targets, no package
   installs, no tracker writes;
+- **a nested agent session (`claude -p`, `codex exec`) runs in the
+  scratch dir with no more than its client's built-in permissions and
+  sandbox**: no flag, settings or config override, or added directory
+  that bypasses or loosens them (among them
+  `--permission-mode bypassPermissions`,
+  `--dangerously-skip-permissions`, `--allowedTools`, `--settings`,
+  `--dangerously-bypass-approvals-and-sandbox`,
+  `--sandbox danger-full-access`, `--approve-for-me`, `-c`, `--profile`,
+  `--add-dir`), and none under a user configuration that already loosens
+  them. A loosened session runs whatever its model chooses outside any
+  sandbox or permission check, and Stage 1b's rules are not in its
+  prompt. A probe that cannot run on these terms, such as one that needs
+  the repo as its working directory, is reported as not run. One that
+  runs tests the client and is not a dispatch, but its model and tokens
+  are reported for Stage 5, marked unavailable when the run shows none;
 - **never point a formatter or fixer at a repo path** — it rewrites
   whatever path it is handed. Copy the file under test into the scratch
   dir first;
