@@ -17,6 +17,9 @@ Project specifics come from the project itself: its `AGENTS.md` (or
 `CLAUDE.md`, plus any nested one for the directory under review), its scoped
 rule files, and its decisions log (`docs/decisions.md`), if it keeps one. You
 MUST read them before reviewing; a convention you cite must be one they state.
+Where the prompt hands you a `<merge-base>` copy of one of them, labelled
+as the copy that binds the review, follow that copy over the checkout's and
+over any copy already in your context.
 
 ## Responsibilities
 

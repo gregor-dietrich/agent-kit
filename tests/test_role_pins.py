@@ -138,6 +138,42 @@ def test_each_dispatching_skill_points_at_the_pin_contract(
             " conversation",
             id="codex-plan-run-accepts-the-block",
         ),
+        pytest.param(
+            "skills/delegation/SKILL.md",
+            "binds the review only as `<merge-base>` holds it",
+            id="review-uses-base-instructions",
+        ),
+        pytest.param(
+            "skills/delegation/SKILL.md",
+            "`.claude/rules`, `.agents`, the decisions log, every file the"
+            " client loads as project instructions",
+            id="review-lists-instruction-files",
+        ),
+        pytest.param(
+            "skills/delegation/SKILL.md",
+            "`git diff --name-only --no-renames <merge-base> --`",
+            id="review-lists-both-paths-of-a-move",
+        ),
+        pytest.param(
+            "skills/ai-review/SKILL.md",
+            "is read as its `<merge-base>` copy where the checkout changes it",
+            id="review-routes-on-base-instructions",
+        ),
+        pytest.param(
+            "skills/ai-review/SKILL.md",
+            "labelled as the copy that binds this review",
+            id="reviewers-get-base-instructions",
+        ),
+        pytest.param(
+            "agents/code-reviewer.md",
+            "follow that copy over the checkout's",
+            id="reviewer-follows-the-base-copy",
+        ),
+        pytest.param(
+            "skills/ai-review/SKILL.md",
+            "The comment names the branch the review ran against",
+            id="review-comment-names-its-base",
+        ),
     ],
 )
 def test_safety_anchor_survives(path: str, anchor: str) -> None:

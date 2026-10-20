@@ -62,7 +62,10 @@ reading only cheap metadata for the scope — `git diff --stat`, the
 changed-file list, the commit subjects — plus, for a deletion-heavy file,
 that file's hunks alone, which is what escalator 3 needs to see. No
 subagents, and no reading of the diff at large: this step decides _how
-much_ review to buy, it does not review.
+much_ review to buy, it does not review. Every project instruction file
+it reads, such as the `AGENTS.md` that draws components and names risk
+paths below, is read as its `<merge-base>` copy where the checkout
+changes it (`agent-kit:delegation`, "The policy").
 
 **Size is not the criterion.** A 700-line mechanical rename is `quick`; a
 40-line change to proxy-header trust is `standard`. What decides it is
@@ -240,14 +243,16 @@ findings"):
   already overtaken.
 
 Write the **full artifacts** to scratchpad files — the complete `git diff`
-for the scope and the complete issue/comment threads — and pass those file
-paths into every Stage 1/2 reviewer prompt, alongside a short **context
-digest** (a few sentences: what the change is for, which issues it closes,
-which decisions bear on it). Reviewers are read-only (in Claude Code no
-shell, no tracker; under Codex the Stage 1 and Stage 2 reviewer prompts
-also carry Stage 1b's list): they Read the artifact files themselves, so
-their scope and tracker context stay lossless instead of anchored to the
-orchestrator's summary — and they never re-fetch.
+for the scope, the complete issue/comment threads, and the `<merge-base>`
+copy of each project instruction file the checkout changes, labelled as
+the copy that binds this review (`agent-kit:delegation`, "The policy") —
+and pass those file paths into every Stage 1/2 reviewer prompt, alongside
+a short **context digest** (a few sentences: what the change is for, which
+issues it closes, which decisions bear on it). Reviewers are read-only (in
+Claude Code no shell, no tracker; under Codex the Stage 1 and Stage 2
+reviewer prompts also carry Stage 1b's list): they Read the artifact files
+themselves, so their scope and tracker context stay lossless instead of
+anchored to the orchestrator's summary — and they never re-fetch.
 
 ### Stage 1 — Review fan-out (`agent-kit:code-reviewer`)
 
@@ -485,6 +490,9 @@ Report every surviving finding, ranked by severity, no cap. Per finding:
 
 When the review target is, or has, an open PR, post the full verified set
 as a PR comment with the tracker CLI **before** acting on any of it.
+The comment names the branch the review ran against and its
+`<merge-base>` (`agent-kit:delegation`, "The policy"), so a PR retargeted
+after review visibly has none for its new base.
 Proposed follow-up issues are proposed to the user — never filed
 unprompted. That bar is about **writing to the tracker**, not about fixing
 code: a small out-of-diff fix is applied and reported, not proposed.
