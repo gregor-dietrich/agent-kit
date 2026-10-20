@@ -186,6 +186,76 @@ def test_pipefail_is_allowed_in_both_shells() -> None:
     assert not _denied(cmd, shell="/bin/bash")
 
 
+def test_mentioning_pipefail_is_not_opting_into_it() -> None:
+    # The word in a grep pattern, a commit message or an echo is prose.
+    for cmd in (
+        "grep -rn pipefail .claude/rules/; make test | tail -5",
+        'git commit -m "use set -o pipefail" && make test | tail -5',
+        "echo pipe_fail; make test | tee out.log",
+        "set +o pipefail; make test | tail -5",
+        "make test | tail -5 # pipefail",
+    ):
+        for shell in ("/bin/zsh", "/bin/bash"):
+            assert _denied(cmd, shell=shell), (cmd, shell)
+
+
+def test_zsh_options_that_turn_pipefail_off_are_denied() -> None:
+    for cmd in ("setopt no_pipe_fail", "unsetopt pipefail"):
+        assert _denied(f"{cmd}; make test | tail -5", shell="/bin/zsh")
+
+
+def test_set_option_clusters_and_scopes_opt_into_pipefail() -> None:
+    for cmd in (
+        "set -euo pipefail; make test | tail -5",
+        "set -euxo pipefail; make test | tail -5",
+        "set -o errexit -o pipefail; make test | tail -5",
+        "(set -o pipefail; make test | tail -5)",
+        "{ set -o pipefail; make test | tail -5; }",
+        "set -o pipefail\nmake test | tail -5",
+    ):
+        for shell in ("/bin/zsh", "/bin/bash"):
+            assert not _denied(cmd, shell=shell), (cmd, shell)
+
+
+def test_set_forms_that_still_enable_pipefail_are_allowed() -> None:
+    for cmd in (
+        "time set -o pipefail; make test | tail -5",
+        "builtin set -o pipefail; make test | tail -5",
+        "X=1 set -o pipefail; make test | tail -5",
+        "set +o pipefail -o pipefail; make test | tail -5",
+        # The set line does not tokenize: unreadable, so never blocked.
+        'set -o pipefail; echo "a\nb"\nmake test | tail -5',
+    ):
+        for shell in ("/bin/zsh", "/bin/bash"):
+            assert not _denied(cmd, shell=shell), (cmd, shell)
+
+
+def test_set_forms_that_leave_pipefail_off_are_denied() -> None:
+    for cmd in (
+        "set -- -o pipefail; make test | tail -5",
+        "set x -o pipefail; make test | tail -5",
+        'set "" -o pipefail; make test | tail -5',
+        # zsh reads -oe as `-o e`; denied in bash too, conservatively.
+        "set -oe pipefail; make test | tail -5",
+        # Untokenizable line, but no pipefail mention: still denied.
+        'echo "a\nb"\nmake test | tail -5',
+    ):
+        for shell in ("/bin/zsh", "/bin/bash"):
+            assert _denied(cmd, shell=shell), (cmd, shell)
+
+
+def test_setopt_is_not_a_bash_builtin() -> None:
+    assert _denied("setopt pipefail; make test | tail -5", shell="/bin/bash")
+
+
+def test_pipefail_opt_out_is_order_blind_by_decision() -> None:
+    # Deliberate: any qualifying segment anywhere opts the whole command
+    # out, even one that runs after the pipeline.
+    cmd = "make test | tail -5; set -o pipefail"
+    assert not _denied(cmd, shell="/bin/zsh")
+    assert not _denied(cmd, shell="/bin/bash")
+
+
 # --- the pipe-status array is spelled differently per shell -----------------
 #
 # Each array is silently EMPTY in the other shell, so the wrong spelling

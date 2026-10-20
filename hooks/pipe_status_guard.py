@@ -36,9 +36,19 @@ looking like a check. The ambient shell is read from ``$SHELL`` and the
 mismatched form is denied with the right spelling named; an explicit
 ``bash -c …``/``zsh -c …`` in the same command is taken at its word, and an
 unrecognised shell disables that arm entirely. The opt-out is read the same
-way: ``set -o pipefail`` in either shell, or zsh's ``setopt PIPE_FAIL``,
-whose option names ignore case and underscores. Everything else here is
-shell-agnostic: a pipeline reports its last segment's status in both.
+way, from the parsed commands and not from a mention of the word: a ``set``
+segment whose option words (``-o``, ``-eo``, ``-euo``, ...) name
+``pipefail``, in either shell, or a ``setopt`` segment naming zsh's
+``PIPE_FAIL`` (not under bash). Order does not matter: one such segment
+anywhere opts the whole command out. A line that does not tokenize cannot be
+read, so if one exists and the command mentions pipefail, it is let through.
+Everything else here is shell-agnostic: a pipeline reports its last
+segment's status in both.
+
+Accepted risk: the quoted string of a ``bash -c``/``zsh -c`` is never parsed
+as commands, so a gated pipeline inside one (``bash -c 'make test | tail'``)
+passes, and so does an opt-out inside one. Writing a command that way is a
+deliberate choice, not the slip this guard catches.
 
 This arm exists because a first version of this guard treated any mention
 of ``PIPESTATUS`` as "already correct", and therefore waved through a zsh
@@ -137,12 +147,6 @@ GIT_OPTS_WITH_VALUE = {
 # .match() would accept any matching prefix.
 GATE_PATH = re.compile(r"(?:\./)?scripts/[\w.-]+\.(?:sh|py)")
 
-# `set -o pipefail` means the same thing in bash and zsh — always correct.
-# zsh reaches the same option through `setopt`, where option names ignore
-# case and underscores, so `setopt PIPE_FAIL` and `setopt pipe_fail` are the
-# same request and must count too.
-PIPEFAIL = re.compile(r"pipe_?fail", re.IGNORECASE)
-
 # The two shells' pipe-status arrays. Same idea, different spelling, and each
 # is silently EMPTY in the other shell — `"${PIPESTATUS[0]}"` under zsh
 # expands to nothing, so the check prints an empty status and proves nothing.
@@ -184,7 +188,11 @@ def _right_incantation() -> str:
     With no known shell, only the shell-agnostic advice is offered.
     """
     ambient = _ambient_shell()
-    return ARRAY_FORM.get(ambient, "'set -o pipefail'")
+    return (
+        f"{ARRAY_FORM[ambient]}, or 'set -o pipefail'"
+        if ambient in ARRAY_FORM
+        else "'set -o pipefail'"
+    )
 
 
 def _wrong_array_for_shell(cmd: str) -> tuple[str, str] | None:
@@ -265,6 +273,58 @@ def _command_of(segment: list[str]) -> tuple[str, str, list[str]]:
     return name, raw, args
 
 
+def _set_enables_pipefail(args: list[str]) -> bool:
+    """Walk ``set``'s option words the way the shell does, left to right."""
+    i = 0
+    while i < len(args) and re.fullmatch(r"[-+][^-]+", args[i]):
+        if not args[i].endswith("o"):
+            i += 1
+            continue
+        if args[i][0] == "-" and args[i + 1 : i + 2] == ["pipefail"]:
+            return True
+        i += 2
+    return False
+
+
+def _opts_into_pipefail(parsed: list[tuple[list[list[str]], str]]) -> bool:
+    """True if any segment turns pipefail on (order-blind, by decision).
+
+    ``set`` options are read left to right and stop at ``-``, ``--`` or the
+    first word not starting with ``-``/``+``. A ``-``/``+`` word ending in
+    ``o`` (``-o``, ``-eo``, ``-euxo``) takes the next word as an option
+    name; ``-`` plus ``pipefail`` opts in, ``+o pipefail`` does not. ``-oe
+    pipefail`` is denied: zsh reads it as ``-o e`` (bash would accept it, but
+    one rule for both is simpler). ``setopt`` counts outside bash, which has
+    none, and takes zsh's option-name rule: case and underscores ignored, so
+    ``no_pipe_fail`` does not match.
+    """
+    for pipeline, _ in parsed:
+        for segment in pipeline:
+            i = 0
+            while i < len(segment) and segment[i] in {"(", "{"}:
+                i += 1
+            name, _, args = _command_of(segment[i:])
+            if name == "set" and _set_enables_pipefail(args):
+                return True
+            if (
+                name == "setopt"
+                and _ambient_shell() != "bash"
+                and any(a.lower().replace("_", "") == "pipefail" for a in args)
+            ):
+                return True
+    return False
+
+
+def _unreadable_pipefail_mention(raw: str, parsed_lines: int) -> bool:
+    """True when a line was skipped as untokenizable and pipefail is named.
+
+    The skipped line may be the very ``set`` that opts in, and a call the
+    guard cannot read is never blocked.
+    """
+    lines = sum(1 for ln in strip_heredocs(raw).split("\n") if ln.strip())
+    return lines > parsed_lines and bool(re.search("pipe_?fail", raw, re.I))
+
+
 def main() -> None:
     raw = command_text(tool_input(read_payload()))
     # Heredoc bodies are prose and must not be read as commands — nor as
@@ -294,9 +354,13 @@ def main() -> None:
     # either is accepted as a genuine attempt rather than denied blindly.
     ambient = _ambient_shell()
     accepted = [ambient] if ambient else list(ARRAY_RE)
-    if PIPEFAIL.search(cmd) or any(ARRAY_RE[s].search(cmd) for s in accepted):
-        return
     parsed = _pipelines(raw)
+    if (
+        _opts_into_pipefail(parsed)
+        or _unreadable_pipefail_mention(raw, len(list(tokenize_lines(raw))))
+        or any(ARRAY_RE[s].search(cmd) for s in accepted)
+    ):
+        return
     for index, (pipeline, follower) in enumerate(parsed):
         if len(pipeline) < 2:
             continue
@@ -323,7 +387,7 @@ def main() -> None:
             "green. Capture the real status instead: redirect to a file and "
             "check the command's own code ('cmd > out.log 2>&1; echo "
             '"EXIT=$?"; tail -20 out.log\'), or use '
-            f"{_right_incantation()}, or 'set -o pipefail'."
+            f"{_right_incantation()}."
         )
 
 
