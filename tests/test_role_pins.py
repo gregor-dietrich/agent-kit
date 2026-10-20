@@ -107,20 +107,40 @@ def test_each_dispatching_skill_points_at_the_pin_contract(
 @pytest.mark.parametrize(
     ("path", "anchor"),
     [
-        (
+        pytest.param(
             "skills/delegation/SKILL.md",
             "a branch must not choose its own reviewer",
+            id="checkout-cannot-choose-its-reviewer",
         ),
-        (
+        pytest.param(
             "skills/ai-review/SKILL.md",
             "a branch must not grant its own consent",
+            id="checkout-cannot-grant-bridge-consent",
         ),
-        ("hooks/session-context.md", "reviewer this checkout changed"),
+        pytest.param(
+            "hooks/session-context.md",
+            "reviewer this checkout changed",
+            id="session-skips-a-changed-reviewer",
+        ),
+        pytest.param(
+            "skills/plan-create/SKILL.md",
+            "writes nothing under `.plans/`",
+            id="codex-plan-writes-no-file",
+        ),
+        pytest.param(
+            "skills/plan-run/SKILL.md",
+            "a `<proposed_plan>` block in the conversation",
+            id="codex-plan-run-looks-for-a-block",
+        ),
+        pytest.param(
+            "skills/plan-run/SKILL.md",
+            "a `<proposed_plan>` block that skill emitted in this"
+            " conversation",
+            id="codex-plan-run-accepts-the-block",
+        ),
     ],
 )
-def test_the_checkout_cannot_choose_its_own_reviewer(
-    path: str, anchor: str
-) -> None:
+def test_safety_anchor_survives(path: str, anchor: str) -> None:
     text = " ".join((_ROOT / path).read_text(encoding="utf-8").split())
     assert anchor in text
 

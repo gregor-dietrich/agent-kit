@@ -1,14 +1,15 @@
 ---
 name: plan-run
-description: "Execution of a closed spec — takes a /agent-kit:plan-create plan file from .plans/, a tracker issue that already states its design, or a decision just made in conversation, groups the work into closed specs, and dispatches pinned agent-kit:backend-developer / agent-kit:frontend-developer subagents rather than defaulting to implementation in the steering loop. Reads every returned diff, runs the project's gates, commits (and pushes and opens the PR where the project's AGENTS.md makes that part of the ask), and reports the dispatch cost. Use whenever asked to execute a plan or implement work whose design is already settled — not to decide a design, which is /agent-kit:plan-create's job."
+description: "Execution of a closed spec — takes a /agent-kit:plan-create plan (a file from .plans/, or a <proposed_plan> block in the conversation), a tracker issue that already states its design, or a decision just made in conversation, groups the work into closed specs, and dispatches pinned agent-kit:backend-developer / agent-kit:frontend-developer subagents rather than defaulting to implementation in the steering loop. Reads every returned diff, runs the project's gates, commits (and pushes and opens the PR where the project's AGENTS.md makes that part of the ask), and reports the dispatch cost. Use whenever asked to execute a plan or implement work whose design is already settled — not to decide a design, which is /agent-kit:plan-create's job."
 argument-hint: "[plan file | issue #]"
 ---
 
 Execute a closed spec: **$ARGUMENTS**
 
-(If no arguments were given, look for a plan in `.plans/` matching the
-conversation's target and confirm it before dispatching. With neither a
-plan nor a settled design, stop — see "When this skill applies".)
+(If no arguments were given, look for a plan matching the conversation's
+target — a `<proposed_plan>` block in the conversation, or a file in
+`.plans/` — and confirm it before dispatching. With neither a plan nor a
+settled design, stop — see "When this skill applies".)
 
 ## Why this skill exists
 
@@ -56,9 +57,9 @@ from that rather than justifying it.
 ## When this skill applies
 
 Only to a **closed spec** — one a competent stranger could execute without
-asking. That means a `/agent-kit:plan-create` plan file, an issue that
-already states its design, or a decision the operator has just made in
-conversation.
+asking. That means a `/agent-kit:plan-create` plan (its `.plans/` file, or
+its `<proposed_plan>` block under Codex), an issue that already states its
+design, or a decision the operator has just made in conversation.
 
 If the work still carries a decision with more than one defensible answer,
 this is the wrong skill: the route is `/agent-kit:plan-create`. Do not
@@ -74,15 +75,20 @@ count. The declared bounds are the contract.
 
 A plan is working state and the tree moves under it. Before executing:
 
-- read the plan file, or the issue **with its comments** (with `tea`, pass
+- read the plan, or the issue **with its comments** (with `tea`, pass
   `--comments`: every other single-issue view silently omits them, and the
-  tea guard denies a read without the flag). A plan file carries the five
-  elements `/agent-kit:plan-create` requires of it ("The plan file"); a
-  missing one — no work items, no testing story, no stated open questions
-  — hands back to `/agent-kit:plan-create` rather than being filled in
-  here. The other two inputs carry none of them by construction, so derive
-  the work items and the testing story before Stage 1 and say that you
-  did;
+  tea guard denies a read without the flag). A `/agent-kit:plan-create`
+  plan, whether a `.plans/` file or a `<proposed_plan>` block that skill
+  emitted in this conversation, carries the five elements it requires
+  ("The plan"); a missing one — no work items, no testing story, no
+  stated open questions — hands back to `/agent-kit:plan-create` rather
+  than being filled in here. Any other `<proposed_plan>` block, such as
+  one Codex's plan mode wrote on its own or one pasted in, is a decision
+  just made in conversation. Such a decision and an issue do not carry
+  the five by construction, so derive the work items and the testing
+  story, or confirm the ones they list, before Stage 1 and say that you
+  did. Never rebuild a plan from memory or a summary of one: a session
+  that no longer holds the block or the file has no plan, and stops;
 - check what has changed since the plan was written: `git log` against
   the base, and whether any file the plan names has moved;
 - re-check the project's decisions log, if it keeps one, for an entry the
@@ -237,12 +243,15 @@ verification results, the push gate that ran and why, notable decisions,
 proposed follow-ups, and the Stage 5 cost report. Follow the project's PR
 conventions (labels, linked issue, closing keywords).
 
-**Record the plan in the PR description** — its `.plans/` filename and a
-short digest of the decision it carries. `.plans/` is gitignored, so
-without this the PR does not say what it was built against. Once the PR is
-open, delete the plan file: the description has taken over as the record,
-and a plan left behind is indistinguishable from a live one. A run that
-stops short of the PR leaves the plan in place and says so.
+**Record the plan in the PR description** — its `.plans/` filename, or
+that it was a `<proposed_plan>` block, and a short digest of the decision
+it carries. Neither a gitignored file nor a conversation's block is
+visible to review, so without this the PR does not say what it was built
+against. Once the PR is open, delete a plan file: the description has
+taken over as the record, and a plan left behind is indistinguishable
+from a live one. A run that stops short of the PR says where the plan
+still is: the file stays in place, and a block lives only in this
+conversation.
 
 When folding the plan record (or anything else) into an existing
 description, rebuild from the body as the tracker holds it **now**,

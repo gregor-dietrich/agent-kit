@@ -1,6 +1,6 @@
 ---
 name: plan-create
-description: "Planning that turns a design decision into a closed spec — use this INSTEAD of the harness's built-in plan mode agents, whose Explore/Plan types carry no model pin and so inherit the steering model. Dispatches pinned agent-kit:scout subagents to gather context and pinned agent-kit:software-architect subagents to produce competing designs, puts the choice to the operator, and writes a plan file under .plans/ that /agent-kit:plan-run can execute in a later session. Use whenever asked to plan, design, scope, or explore an approach to a change that carries a decision with more than one defensible answer. NOT for work whose design is already settled — a closed spec, a bug fix with an established cause, a rename or a doc fix go straight to /agent-kit:plan-run or straight to the edit."
+description: "Planning that turns a design decision into a closed spec — use this INSTEAD of the harness's built-in plan mode agents, whose Explore/Plan types carry no model pin and so inherit the steering model. Dispatches pinned agent-kit:scout subagents to gather context and pinned agent-kit:software-architect subagents to produce competing designs, puts the choice to the operator, and hands /agent-kit:plan-run the plan: a file under .plans/ it can execute in a later session or, under Codex, a <proposed_plan> block in the conversation. Use whenever asked to plan, design, scope, or explore an approach to a change that carries a decision with more than one defensible answer. NOT for work whose design is already settled — a closed spec, a bug fix with an established cause, a rename or a doc fix go straight to /agent-kit:plan-run or straight to the edit."
 argument-hint: "[issue # | a description of the work]"
 ---
 
@@ -125,14 +125,14 @@ cannot go and check itself.
 
 Present the options as the `agent-kit:design-exploration` skill's
 "Presenting, and who decides" requires. **The choice MUST be put where it
-can be answered — visible end-of-turn text, or a question.** A plan file
-is one more place that only _records_ a decision: do not report the run
-as complete while the choice is open, and do not write the plan file
-until it is made.
+can be answered — visible end-of-turn text, or a question.** A plan is
+one more place that only _records_ a decision: do not report the run as
+complete while the choice is open, and do not write the plan file, or
+under Codex emit the `<proposed_plan>` block, until it is made.
 
 ### Stage 4 — Write the plan
 
-Only after Stage 3 is answered. See "The plan file" below.
+Only after Stage 3 is answered. See "The plan" below.
 
 Then apply the `agent-kit:design-exploration` skill's "After a decision"
 to the plan: one fresh-eyes self-review, fixed inline, and — where the
@@ -150,7 +150,7 @@ Report a run that dispatched **nothing** just as explicitly, with the
 reason. A cost report of zero that says nothing implies the question never
 came up.
 
-## The plan file
+## The plan
 
 Written to **`.plans/<slug>.md`**, where `<slug>` is the issue number when
 there is one (`42.md`) and a short kebab-case name otherwise. The project
@@ -161,7 +161,8 @@ plan.
 
 That choice has one cost, and `/agent-kit:plan-run` pays it rather than
 ignoring it: the plan is invisible to review, so the implementing PR
-records the plan's **filename and a short digest** in its description.
+records where the plan came from — its **filename**, or that it was a
+`<proposed_plan>` block — and **a short digest** in its description.
 Otherwise nobody but the operator can see what the implementation was run
 against.
 
@@ -179,12 +180,23 @@ A plan file MUST carry these five elements:
 - anything the plan is **unsure about** — the open questions, stated as
   open, not smoothed over.
 
+Under Codex the plan is not a file. Stage 4 ends, after the self-review
+and any entry draft, with one complete `<proposed_plan>` block in the
+conversation, carrying the same five elements, and writes nothing under
+`.plans/`. In Codex's Plan mode that block is the planning handoff, and
+the mode is not expected to change the checkout; outside it the block is
+plain text, which `/agent-kit:plan-run` reads all the same. A
+decisions-log entry Stage 4 drafts goes into the block, as a
+work item carrying the entry's text, rather than into the log.
+
 Plans are not versioned and not authoritative once merged: when the work
 lands, the PR description is the durable record, and `/agent-kit:plan-run`
 deletes the plan file once it has opened that PR. Until then the plan
 stays, so a resumed session can pick it up — which is why
 `/agent-kit:plan-run` re-checks the ground rather than trusting the file's
-presence.
+presence. A `<proposed_plan>` block has no such life outside its
+conversation: a session that no longer holds it has no plan, and
+`/agent-kit:plan-run` stops rather than rebuilding one from memory.
 
 ## Reliability
 
