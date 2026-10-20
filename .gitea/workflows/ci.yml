@@ -34,5 +34,28 @@ jobs:
         with:
           node-version: "22"
           check-latest: true # not a cached 22.x below devkit's node floor
+      # The runner's downloads from PyPI intermittently crawl, and every run
+      # fetches the same wheels: the bootstrap's uv, then uv.lock's set.
+      # Only a push to main saves, which keeps ordinary branch runs out of the
+      # cache but cannot keep a branch out: act_runner scopes entries by
+      # repository alone, and a branch runs its own copy of this file. That
+      # is accepted, since a branch already runs with DEVKIT_TOKEN. The
+      # restore-keys fallback carries the last lock's wheels into each new
+      # entry, so a lock change downloads only its delta and the cache grows.
+      - id: wheels
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/uv
+          key: wheels-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}
+          restore-keys: wheels-${{ runner.os }}-${{ runner.arch }}-
       - run: make lint-repo
       - run: make test
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.wheels.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/uv
+          key: ${{ steps.wheels.outputs.cache-primary-key }}
