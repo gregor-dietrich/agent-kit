@@ -82,7 +82,11 @@ A plan is working state and the tree moves under it. Before executing:
   emitted in this conversation, carries the five elements it requires
   ("The plan"); a missing one — no work items, no testing story, no
   stated open questions — hands back to `/agent-kit:plan-create` rather
-  than being filled in here. Any other `<proposed_plan>` block, such as
+  than being filled in here. A reference that resolves to neither text
+  in the plan nor a durable source (an issue or its comments, the code,
+  a doc, a commit), such as "the design's wording", leaves it no closed
+  spec either: ask the operator for the missing text rather than writing
+  it here. Any other `<proposed_plan>` block, such as
   one Codex's plan mode wrote on its own or one pasted in, is a decision
   just made in conversation. Such a decision and an issue do not carry
   the five by construction, so derive the work items and the testing

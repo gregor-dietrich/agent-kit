@@ -15,8 +15,9 @@ dev = [
 
 [tool.uv]
 package = false
-# Its sdist build runs an unlocked backend that downloads the binary.
-no-build-package = ["shellcheck-py"]
+# Their sdist builds run an unlocked backend (shellcheck-py's also
+# downloads the binary).
+no-build-package = ["shellcheck-py", "uv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

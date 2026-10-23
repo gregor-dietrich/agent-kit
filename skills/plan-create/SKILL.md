@@ -141,6 +141,11 @@ tests — an entry drafted with `**Status:** Proposed`. You MUST NOT mark it
 `**Status:** Accepted`: ratification is the operator's act alone, and the
 decisions-log status guard enforces it.
 
+The self-review also resolves every reference to a design text ("per the
+design", "use the agreed wording"): it must point at text in the plan or
+at a durable source ("The plan"). The scratchpad, task files and dispatch
+returns are session-local and do not count.
+
 ### Stage 5 — Cost report
 
 Report per the `agent-kit:delegation` skill, "Cost observability",
@@ -179,6 +184,16 @@ A plan file MUST carry these five elements:
   which gated suite (if any) the work belongs in;
 - anything the plan is **unsure about** — the open questions, stated as
   open, not smoothed over.
+
+A plan inlines, verbatim, every text a work item must use that has no
+durable home: wording, messages and protocols written in the steering
+loop or taken from a dispatch return, which exist only in this session's
+context. The session that executes the plan, often on another machine,
+cannot find them, and does not fail but improvises. Everything durable,
+which means reachable from the executing machine (issues and their
+comments, pushed code, docs and commits), is cited by number, hash or
+`path:line`, never quoted: it can be looked up, and a copy goes stale. A
+credential is never inlined: name where the executing session gets it.
 
 Under Codex the plan is not a file. Stage 4 ends, after the self-review
 and any entry draft, with one complete `<proposed_plan>` block in the

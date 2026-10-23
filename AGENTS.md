@@ -82,10 +82,13 @@ that can break silently.
   the gate. An agent bound by the push-gate skill cannot, and hands the
   push to its operator. In an arm64 container on a Mac, run the gates on
   the host instead. x86_64 musl matches the marker but has no wheel, so
-  `make install` fails there (#48).
+  `make install` fails there (#48). uv is on `no-build-package` too, so
+  where uv ships no wheel `make install` fails instead of building it
+  (#49 lists those platforms).
 - `make install` — syncs `.venv` exactly from `uv.lock`, removing
   anything installed into it by hand. It takes uv from PATH, then
-  `.venv`, else bootstraps the pinned uv with `python3 -m venv` and pip;
+  `.venv`, else bootstraps the pinned uv with `python3 -m venv` and pip,
+  installing only a wheel whose sha256 `uv.lock` records;
   uv fetches CPython 3.13 when none is found. `make test` and
   `make lint-repo` both run it first.
 - `make test` — runs pytest after `make install`. CI runs `lint-repo`
@@ -96,5 +99,6 @@ that can break silently.
   that passed on a strictly clean tree; pre-push skips that HEAD while
   the tree stays unchanged. A run that records nothing says why.
 - `claude plugin validate .` — after any manifest, hook, skill or agent
-  change. Expected warnings: the two missing `author` fields, and the
-  root `CLAUDE.md` not being plugin context (it is this repository's).
+  change. Expected warnings: the two missing `author` fields, the root
+  `CLAUDE.md` not being plugin context (it is this repository's), and
+  the plugin-directory check's `ICON_MISSING`.
