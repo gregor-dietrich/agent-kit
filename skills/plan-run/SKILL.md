@@ -118,6 +118,11 @@ Require each dispatch to report **what it was unsure about**, not only
 what it did. That return is the most useful thing a subagent produces and
 it is lost unless the prompt asks for it.
 
+Name the session's scratch directory in each dispatch (Claude Code's
+session scratchpad; under a client with none, say so) as the place for
+the agent's scratch files and gate logs. A bare `mktemp` lands in `/tmp`,
+outside anything that cleans up after the session, and stays there.
+
 ### Stage 2 — Dispatch (the writing agents)
 
 - `agent-kit:frontend-developer` for user-facing UI — pages, components,
@@ -161,7 +166,8 @@ it is lost unless the prompt asks for it.
   2. Stage it in the worktree: `git -C <worktree> add -A`.
   3. Write `git -C <worktree> diff --cached --binary --no-color
      --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/` to its
-     own `mktemp` file, one per worktree; the pins make the patch immune
+     own file in the scratch directory (`mktemp "<scratch>/patch.XXXXXX"`),
+     one per worktree; the pins make the patch immune
      to a user's `color.ui`, `diff.noprefix` and textconv drivers.
   4. List what the text cannot show, `git -C <worktree> diff --cached
      --numstat --summary` (a `-` `-` row is binary; `--summary` shows mode,

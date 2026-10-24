@@ -98,9 +98,12 @@ and the code style you follow.
   for your own changes to it. An edit you meant to make that they do not
   show goes under **Unsure**
 - **Gates**: per gate, the exact command, its exit status, and the path of
-  a log holding its full output, written outside the working tree (a
-  `mktemp` file) so it never enters the diff
-  (`log=$(mktemp); make test >"$log" 2>&1; echo "exit=$?"`). Only a run
+  a log holding its full output, written outside the working tree so it
+  never enters the diff: in the scratch directory the dispatch names, a
+  plain `mktemp` file only where it names none
+  (`log=$(mktemp "<scratch>/gate.XXXXXX"); make test >"$log" 2>&1;
+  echo "exit=$?"`). A bare `mktemp` lands in `/tmp`, where nothing that
+  cleans up after the session reaches it. Only a run
   started after your last edit counts; a gate not re-run since is
   reported as not run
 - **Left for others**: UI changes for `agent-kit:frontend-developer`,
