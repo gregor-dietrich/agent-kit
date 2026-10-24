@@ -219,10 +219,10 @@ right answer, so no check enforces this rule.
 ## One policy, every consumer
 
 The skills that dispatch agents — `/agent-kit:plan-create`,
-`/agent-kit:plan-run`, `/agent-kit:ai-review` — and this rule instantiate
-the SAME policy: review and implementation MUST NOT diverge on when and
-how work is dispatched. Change the policy in one place and reconcile the
-others in the same change.
+`/agent-kit:plan-run`, `/agent-kit:ai-review`, `/agent-kit:next` — and
+this rule instantiate the SAME policy: review and implementation MUST NOT
+diverge on when and how work is dispatched. Change the policy in one place
+and reconcile the others in the same change.
 
 The failure this prevents, observed in practice: a review skill carried a
 blanket "MUST NOT apply fixes itself" with no smallness exception,

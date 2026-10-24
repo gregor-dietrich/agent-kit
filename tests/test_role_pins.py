@@ -95,6 +95,7 @@ def test_no_shipped_prose_copies_a_model_pin() -> None:
         ("plan-create", "Pins by client"),
         ("plan-run", "Pins by client"),
         ("ai-review", "Pins by client"),
+        ("next", "Pins by client"),
     ],
 )
 def test_each_dispatching_skill_points_at_the_pin_contract(
@@ -245,6 +246,21 @@ def test_each_dispatching_skill_points_at_the_pin_contract(
             "skills/plan-run/SKILL.md",
             "ask the operator for the missing text rather than writing it here",
             id="plan-run-asks-for-unresolved-texts",
+        ),
+        pytest.param(
+            "skills/next/SKILL.md",
+            "never through a call this skill makes",
+            id="next-closes-no-issue-itself",
+        ),
+        pytest.param(
+            "skills/next/SKILL.md",
+            "start nothing until the operator answers",
+            id="next-waits-for-the-bundling-choice",
+        ),
+        pytest.param(
+            "skills/next/SKILL.md",
+            "The question states what a pick authorises",
+            id="next-names-what-a-pick-authorises",
         ),
     ],
 )

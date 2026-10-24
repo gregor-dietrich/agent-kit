@@ -1,4 +1,4 @@
-// devkit's profile, minus MD041: the agent definitions and three skills put
+// devkit's profile, minus MD041: the agent definitions and four skills put
 // prose, not a heading, after their frontmatter, CLAUDE.md is an import, and
 // hooks/session-context.md is injected into every session as it stands.
 {

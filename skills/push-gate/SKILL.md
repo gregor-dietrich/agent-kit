@@ -48,6 +48,8 @@ HEAD and the report saying so. In doubt, the full gate.
   not a fresh checkout's.
 - With a tool timeout long enough for the gate and for whatever the push
   hook runs. MUST NOT use `--no-verify`, a timed-out push included.
+- Without force, unless the operator asks for it: a rejected push stops
+  and is reported, never retried with `--force`.
 - The invariant is that the pushed tip is green under the gate the
   project requires.
 

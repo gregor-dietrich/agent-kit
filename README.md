@@ -38,6 +38,7 @@ setup that grows the way the original did.**
 | `skills/review-triage` | Context gathering, recording, `novel`/`instance` marks, finding destinations | Any repository; release bar comes from the project's decisions log |
 | `skills/debugging`, `skills/design-exploration` | Method: no fix without a root cause; two or three options and the operator's choice for a real design decision | Any repository; boundaries and gates come from the project's rules. |
 | `skills/plan-create`, `skills/plan-run` | Decision → closed spec → pinned dispatches → PR | Any repository; gates and PR conventions come from the project's rules |
+| `skills/next` | Goal → bundled PRs: reads the tracker, proposes how the work splits into dispatches and PRs, then runs plan-create, plan-run and the push gate, with ai-review before the push under `--review` | Any repository; tracker through `gh`, `glab` or `tea`; PR conventions come from the project's rules |
 | `skills/push-gate` | Which gate a push owes, and how it runs | Any repository; narrower gates come from the project's rules |
 | `skills/ai-review` | Multi-agent review with pinned agents, stance-split verification and no finding cap | Any repository; risk paths can be named in the project's `AGENTS.md` |
 | `agents/*` | scout, code-reviewer, software-architect, backend-developer, frontend-developer | Claude Code runs them as agent types, Codex spawns them on their `codex-model` and `codex-effort`; each reads the project's own docs before acting |
