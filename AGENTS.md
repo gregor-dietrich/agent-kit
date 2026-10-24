@@ -57,7 +57,8 @@ that can break silently.
 ## Gates
 
 - Every `make` target first runs `./devkitw`, which fetches the pinned
-  devkit once per pin (forge access needed then); CI fetches it with the
+  devkit once per pin (forge access and `ssh-keygen` needed then: it
+  verifies the release tag's signature); CI fetches it with the
   `DEVKIT_TOKEN` secret.
 - `make lint-repo` — devkit's repository gates (action pins, gitleaks
   over the history and uncommitted changes, markdownlint), plus this
