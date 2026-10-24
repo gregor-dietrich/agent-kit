@@ -26,7 +26,7 @@
 # The user's own provider and MCP servers are left out with it; auth still
 # comes from CODEX_HOME.
 #
-# The user opts in, once for every project, by creating the file
+# The user opts in, with one file that covers every project, by creating
 # ${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit/codex-bridge; its content is
 # not read. Without it, codex is never called: the file is the user's
 # consent to send the review prompt, and whatever codex chooses to read,

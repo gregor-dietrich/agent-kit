@@ -107,7 +107,7 @@ reasoning effort and sandbox from the `codex-*` keys in
 It sends the review prompt (the diff, the PR and issue threads, the
 context digest) to a second vendor, plus any file codex chooses to read,
 and the preamble itself points it at files outside the project. So it
-runs only once you opt in, once for every project:
+runs only once you opt in, with one file that covers every project:
 
 ```sh
 mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit"

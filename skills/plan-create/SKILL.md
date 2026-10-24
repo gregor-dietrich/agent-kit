@@ -155,6 +155,29 @@ Report a run that dispatched **nothing** just as explicitly, with the
 reason. A cost report of zero that says nothing implies the question never
 came up.
 
+### Stage 6 — Handoff
+
+The response ends with one line naming the session `/agent-kit:plan-run`
+runs the plan in, with the command and the reason, so the operator can
+overrule it:
+
+- a plan file, from a run that dispatched any agent: a **fresh
+  session**, e.g. "Run `/agent-kit:plan-run .plans/42.md` in a fresh
+  session: this run dispatched 3 agents." Their returns and the rejected
+  options crowd the context and anchor the work to readings the plan did
+  not keep, and the file is written to stand alone;
+- a plan file, from a run that dispatched nothing: the **same session**,
+  whose context holds only the ground reads and the thread, which
+  plan-run would read again. Those two are the default, not a ceiling:
+  where this run's context argues the other way (a dispatching run whose
+  returns were short and whose plan is one small item, a run with no
+  dispatch whose thread grew long), say the other session, naming the
+  default and why this run departs from it;
+- a `<proposed_plan>` block: the **same session**, the only one holding
+  it;
+- a run inside `/agent-kit:next`: the **same session**, where next's
+  Stage 2 runs plan-run.
+
 ## The plan
 
 Written to **`.plans/<slug>.md`**, where `<slug>` is the issue number when

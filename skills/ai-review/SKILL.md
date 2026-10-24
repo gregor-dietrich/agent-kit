@@ -381,8 +381,8 @@ order:
   unconfirmed, fall through to the opt-in below;
 - otherwise, agent-kit's bridge, where the user has opted in by creating
   the file `${XDG_CONFIG_HOME:-~/.config}/agent-kit/codex-bridge`. The
-  opt-in is the user's, once for every project, and lives outside every
-  checkout: a branch must not grant its own consent. The bridge checks
+  opt-in is the user's, one file that covers every project, and lives
+  outside every checkout: a branch must not grant its own consent. The bridge checks
   the file itself and exits 2 without it. Run
   `<base>/../../scripts/codex-agent.sh code-reviewer <prompt-file>
   <transcript-file>` from inside the project with the Bash tool's
