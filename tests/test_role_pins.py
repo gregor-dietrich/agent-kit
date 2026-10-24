@@ -135,8 +135,7 @@ def test_each_dispatching_skill_points_at_the_pin_contract(
         ),
         pytest.param(
             "skills/plan-run/SKILL.md",
-            "a `<proposed_plan>` block that skill emitted in this"
-            " conversation",
+            "a `<proposed_plan>` block that skill emitted in this conversation",
             id="codex-plan-run-accepts-the-block",
         ),
         pytest.param(

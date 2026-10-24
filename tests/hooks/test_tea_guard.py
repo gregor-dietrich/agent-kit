@@ -8,29 +8,17 @@ exists because tea's single-entity views silently omit comments, which has
 shipped work against a diagnosis already recorded on its own issue.)
 """
 
-import json
 import subprocess
 from pathlib import Path
+
+from bash_hook import run_bash_hook
 
 _ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _ROOT / "hooks" / "tea-guard.sh"
 
 
-def _run_hook(command: str) -> str:
-    payload = {"tool_name": "Bash", "tool_input": {"command": command}}
-    result = subprocess.run(
-        ["bash", str(_HOOK)],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-    )
-    return result.stdout
-
-
 def _denied(command: str) -> bool:
-    return '"permissionDecision": "deny"' in _run_hook(command)
+    return '"permissionDecision": "deny"' in run_bash_hook(_HOOK, command)
 
 
 # --- single-entity reads must carry --comments ------------------------------

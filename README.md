@@ -142,8 +142,9 @@ clients do and requires a deny. Change a hook only with its tests.
 
 ## Developing
 
-See [AGENTS.md](AGENTS.md). `make lint-repo` runs devkit's repository
-gates and shellcheck; `make test` runs the suite. Both first sync a
-uv-locked `.venv` (bootstrapping the pinned uv when none is installed).
-CI runs both. Every `make` target fetches the pinned devkit on first use,
-which needs forge access.
+See [AGENTS.md](AGENTS.md). `make lint` runs devkit's repository gates,
+shellcheck, ruff, vulture and devkit's Python gates; `make test` runs
+the suite under a coverage floor. Both first sync a uv-locked `.venv`,
+installing the pinned uv hash-verified when devkit's cache lacks it.
+CI runs both. Every `make` target fetches the pinned devkit on first
+use, which needs forge access.

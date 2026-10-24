@@ -17,17 +17,24 @@ import stat
 import subprocess
 import time
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "codex-agent.sh"
-_FIXTURE = (
-    Path(__file__).parent / "fixtures" / "codex_exec_stderr_0.160.0.txt"
-)
+_FIXTURE = Path(__file__).parent / "fixtures" / "codex_exec_stderr_0.160.0.txt"
 _TOOLS = (
-    "bash", "cat", "dirname", "git", "grep", "awk", "mktemp", "rm", "sleep",
+    "bash",
+    "cat",
+    "dirname",
+    "git",
+    "grep",
+    "awk",
+    "mktemp",
+    "rm",
+    "sleep",
 )
 # Optional, as in the wrapper: GNU coreutils' bound, absent on a stock macOS.
 _BOUND = shutil.which("timeout") or shutil.which("gtimeout")
@@ -224,7 +231,7 @@ def test_verified_run_passes_the_pin_and_prints_the_message(
     argv = bridge.argv
     assert argv[0] == "exec"
     assert argv[-1] == "-"
-    pairs = list(zip(argv, argv[1:]))
+    pairs = list(pairwise(argv))
     assert ("--cd", str(bridge.project)) in pairs
     assert ("--color", "never") in pairs
     assert ("-m", "gpt-test") in pairs
@@ -266,9 +273,10 @@ def test_a_cdpath_cannot_redirect_the_kit_root(bridge: Bridge) -> None:
     )
     assert result.returncode == 0, result.stderr
     role_file = bridge.kit / "agents" / "code-reviewer.md"
-    assert f"instructions are in {role_file};" in (
-        bridge.fake / "stdin"
-    ).read_text()
+    assert (
+        f"instructions are in {role_file};"
+        in (bridge.fake / "stdin").read_text()
+    )
 
 
 def test_the_captured_0_160_0_banner_parses_and_verifies(
@@ -482,7 +490,7 @@ def test_a_terminated_wrapper_takes_codex_with_it(
 
 @pytest.mark.parametrize("locale", ["C", "C.UTF-8"])
 @pytest.mark.parametrize(
-    "figure", ["1,234", "1.234", "1 234", "1 234"]
+    "figure", ["1,234", "1.234", "1 234", "1\u00a0234", "1\u202f234"]
 )
 def test_token_figure_is_normalised(
     bridge: Bridge, figure: str, locale: str
@@ -611,9 +619,7 @@ def test_an_unknown_or_path_like_role_is_refused(
 def test_a_missing_pin_key_is_refused_by_name(
     bridge: Bridge, key: str, how: str
 ) -> None:
-    pin: dict[str, str | None] = {
-        **_PIN, key: "" if how == "empty" else None
-    }
+    pin: dict[str, str | None] = {**_PIN, key: "" if how == "empty" else None}
     body = f"{key}: {_PIN[key]}\n" if how == "only in the body" else "B.\n"
     bridge.role(_role(pin, body))
     result = bridge.run()
@@ -733,9 +739,7 @@ def test_an_unwritable_transcript_path_is_refused(bridge: Bridge) -> None:
 
 
 @pytest.mark.parametrize("count", [0, 1, 4])
-def test_a_wrong_argument_count_is_refused(
-    bridge: Bridge, count: int
-) -> None:
+def test_a_wrong_argument_count_is_refused(bridge: Bridge, count: int) -> None:
     args = ["code-reviewer", bridge.prompt, "transcript.log", "extra"]
     result = bridge.run(args[:count])
     assert result.returncode == 2
@@ -776,9 +780,10 @@ def test_the_bridge_refuses_every_shipped_role_without_a_sandbox_pin(
 def test_the_skill_reaches_the_shipped_bridge() -> None:
     # ai-review runs the bridge relative to its own base directory.
     skill = _ROOT / "skills" / "ai-review"
-    assert "<base>/../../scripts/codex-agent.sh" in (
-        skill / "SKILL.md"
-    ).read_text()
+    assert (
+        "<base>/../../scripts/codex-agent.sh"
+        in (skill / "SKILL.md").read_text()
+    )
     target = skill / ".." / ".." / "scripts" / "codex-agent.sh"
     assert target.is_file()
     assert os.access(target, os.X_OK)

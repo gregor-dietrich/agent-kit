@@ -14,7 +14,7 @@ that can break silently.
 | `hooks/` | `hooks.json` (read by both clients), the guard scripts it registers, and `session-context.md`, the only text injected into every session |
 | `skills/` | One `<name>/SKILL.md` per skill, shared by both clients |
 | `agents/` | Generic role definitions; each pins its model per client in its frontmatter: `model:` for Claude Code, which runs them as agent types, `codex-model` and `codex-effort` for Codex, whose steering loop spawns them (delegation skill, "Pins by client"). code-reviewer's `codex-sandbox` is the review bridge's alone. |
-| `scripts/` | `install.sh`, the dev venv helper `make install` runs, and `codex-agent.sh`, the opt-in Codex bridge ai-review Stage 1c fires |
+| `scripts/` | `codex-agent.sh`, the opt-in Codex bridge ai-review Stage 1c fires |
 | `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here |
 | `devkitw`, `devkit.toml` | devkit's wrapper, copied verbatim from the pinned tag and never edited, and its pin |
 
@@ -83,17 +83,32 @@ that can break silently.
   the gate. An agent bound by the push-gate skill cannot, and hands the
   push to its operator. In an arm64 container on a Mac, run the gates on
   the host instead. x86_64 musl matches the marker but has no wheel, so
-  `make install` fails there (#48). uv is on `no-build-package` too, so
-  where uv ships no wheel `make install` fails instead of building it
-  (#49 lists those platforms).
-- `make install` — syncs `.venv` exactly from `uv.lock`, removing
-  anything installed into it by hand. It takes uv from PATH, then
-  `.venv`, else bootstraps the pinned uv with `python3 -m venv` and pip,
-  installing only a wheel whose sha256 `uv.lock` records;
-  uv fetches CPython 3.13 when none is found. `make test` and
-  `make lint-repo` both run it first.
-- `make test` — runs pytest after `make install`. CI runs `lint-repo`
-  and `test`.
+  `make install` fails there (#48). uv, msgpack and ruff are on
+  `no-build-package` too, so where one ships no wheel `make install`
+  fails instead of building it (#49 lists uv's platforms, #71
+  msgpack's and ruff's). charset-normalizer, coverage and tomli are
+  listed as well, but each ships a pure-Python wheel.
+- `make install` — devkit's: installs the uv `uv.lock` pins,
+  hash-verified, into devkit's tool cache (never a uv on PATH or in
+  `.venv`), then runs `uv sync --locked`, which fails on a `uv.lock`
+  stale against `pyproject.toml`; uv fetches CPython 3.13 when none
+  is found. Needs python3 3.11 or later. `make lint-repo`, through
+  `lint-shell`, and `make test` run it first.
+- `make test` — devkit's, after `make install`: checks `.venv`
+  against `uv.lock`, then holds the statement and branch coverage of
+  `hooks/` to the Makefile's `COVERAGE_FLOOR`. `tests/conftest.py`
+  puts `.venv`'s `bin` first on PATH, so the hooks the tests start
+  run under the venv's python3, where coverage measures them; in a
+  session they run under the user's python3. The floor tests run each
+  guard once at 3.9 and 3.10, and an import check holds every
+  `hooks/*.py` import, function-level ones included, to 3.10's stdlib.
+- `make lint` — `lint-repo`, then ruff (80 columns, E501 included;
+  target py310, the hooks' floor, and py313 for `tests/`), vulture,
+  and devkit's anchored-match and copy-paste gates (`devkit.toml`).
+  CI runs `make lint` and `make test`; `make gate` and pre-push run
+  `lint-repo test` only, so run `make lint` before pushing.
+  `make format` applies ruff, and a change it makes to `hooks/` needs
+  the version bump.
 - `make hooks` once per clone: `pre-commit` runs `make lint-repo`,
   `pre-push` `make lint-repo test`.
 - `make gate` — runs the push gate (`lint-repo test`) and records a HEAD

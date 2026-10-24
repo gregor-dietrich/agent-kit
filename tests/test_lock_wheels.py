@@ -8,8 +8,10 @@ _ROOT = Path(__file__).resolve().parents[1]
 _EXPECTED = {
     "macosx_10_9_x86_64",
     "macosx_11_0_arm64",
-    "manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64"
-    ".manylinux_2_5_x86_64",
+    (
+        "manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64"
+        ".manylinux_2_5_x86_64"
+    ),
     "win_amd64",
 }
 
@@ -42,9 +44,7 @@ def test_packages_without_pure_python_wheels_are_never_built() -> None:
         and p["name"] not in no_build
         and not (
             p.get("wheels")
-            and all(
-                w["url"].endswith("-none-any.whl") for w in p["wheels"]
-            )
+            and all(w["url"].endswith("-none-any.whl") for w in p["wheels"])
         )
     )
     assert not risky, (

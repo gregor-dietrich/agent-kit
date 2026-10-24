@@ -125,6 +125,7 @@ _HEADING = re.compile(r"^## (ADR-\d+)", re.MULTILINE)
 
 GUARDED = "docs/decisions.md"
 
+
 def _rendered(text: str) -> str:
     """*text* as a reader sees it, as far as status markers go."""
     text = html.unescape(_UNRENDERED.sub("", text))
@@ -211,7 +212,6 @@ def _vet_view(before: str, after: str) -> None:
 # (measured), so an old_string missing verbatim may still apply. Line
 # endings need no such step: read_text already reads CRLF as LF.
 _QUOTES = str.maketrans("\u2018\u2019\u201c\u201d", "''\"\"")
-
 
 
 def _is_guarded(path: str) -> bool:

@@ -4,3 +4,7 @@
 url = "ssh://git@git.vptr.de:222/gregor/devkit.git"
 version = "v0.8.0"
 commit = "3fc9ed03eebdde6ceb696fd9e5c3ea286281868d"
+
+[python.duplication]
+paths = ["hooks", "tests"]
+

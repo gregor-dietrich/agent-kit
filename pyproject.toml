@@ -7,19 +7,52 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    # devkit's check-python requires it; with dependencies = [], make
+    # audit has nothing to audit, and the dev group is never audited.
+    "pip-audit>=2.10.1",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.2",
     # Only where it ships a wheel (uv.lock); never built, see below.
     "shellcheck-py>=0.11.0.1; sys_platform == 'darwin' or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
     "uv>=0.12.23",
+    "vulture>=2.16",
 ]
 
 [tool.uv]
 package = false
 # Their sdist builds run an unlocked backend (shellcheck-py's also
 # downloads the binary).
-no-build-package = ["shellcheck-py", "uv"]
+no-build-package = [
+    "charset-normalizer",
+    "coverage",
+    "msgpack",
+    "ruff",
+    "shellcheck-py",
+    "tomli",
+    "uv",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["hooks"]
-addopts = ["-ra", "--strict-markers"]
+addopts = ["-ra", "--strict-markers", "--cov=hooks"]
+
+[tool.coverage.run]
+branch = true
+patch = ["subprocess"]
+
+[tool.ruff]
+line-length = 80
+target-version = "py310"
+# tests/ run only on the venv's 3.13; hook_lib is first-party there.
+per-file-target-version = { "tests/**" = "py313" }
+src = [".", "hooks"]
+
+[tool.ruff.lint]
+extend-select = ["E501"]
+
+[tool.vulture]
+paths = ["hooks", "tests"]
+# shlex reads it: hooks/hook_lib.py sets it on a shlex.shlex
+ignore_names = ["whitespace_split"]

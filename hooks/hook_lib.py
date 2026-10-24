@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Shared plumbing for the Claude Code and Codex hooks in this directory.
 
 One definition of the hook wire format instead of a hand-maintained copy per

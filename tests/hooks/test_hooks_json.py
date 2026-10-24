@@ -139,15 +139,18 @@ def python3_dir(
 ) -> Callable[[str], Path]:
     """A directory whose ``python3`` is CPython *version*, fetched by uv.
 
-    Fetched into the pytest cache (a temporary directory when the cache is
-    disabled), with HOME, the XDG directories and uv's own pointed there as
-    well, so the real global install is never touched and a warm cache
-    skips the download.
+    Fetched into ``.test-python/`` under the repository (a temporary
+    directory when the pytest cache plugin is disabled), with HOME, the XDG
+    directories and uv's own pointed there as well, so the real global
+    install is never touched and a warm directory skips the download. Not
+    the pytest cache: devkit's test.sh passes ``--cache-clear``, which would
+    wipe it and fetch both CPythons on every ``make test``.
     """
-    cache = getattr(pytestconfig, "cache", None)
-    root = (
-        cache.mkdir("python3") if cache else tmp_path_factory.mktemp("python3")
-    )
+    if getattr(pytestconfig, "cache", None):
+        root = _ROOT / ".test-python"
+        root.mkdir(exist_ok=True)
+    else:
+        root = tmp_path_factory.mktemp("python3")
     env = {k: v for k, v in os.environ.items() if not k.startswith("UV_")}
     env |= {
         key: str(root / key.lower())
@@ -183,8 +186,24 @@ def python3_dir(
         )
         bin_dir = root / f"bin-{version}"
         bin_dir.mkdir(exist_ok=True)
-        (bin_dir / "python3").unlink(missing_ok=True)
-        (bin_dir / "python3").symlink_to(found)
+        # Renamed into place, so a session sharing the directory never finds
+        # python3 missing and falls through to the next one on PATH.
+        link = bin_dir / f".python3.{os.getpid()}"
+        link.unlink(missing_ok=True)
+        link.symlink_to(found)
+        link.replace(bin_dir / "python3")
+        ran = subprocess.run(
+            [
+                bin_dir / "python3",
+                "-c",
+                "import sys; print(*sys.version_info[:2], sep='.')",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout.strip()
+        assert ran == version, ran
         return bin_dir
 
     return fetch
@@ -210,6 +229,66 @@ def test_the_registered_command_holds_the_python_floor(
     ]
     below = tuple(map(int, version.split("."))) < hook_lib.FLOOR
     assert (floor in reason) == below, reason
+
+
+# Run under the floor interpreter: prints every import in a ``*.py`` directly
+# in argv[1] that is neither 3.10's stdlib nor a sibling module.
+_IMPORT_CHECK = """
+import ast, sys
+from pathlib import Path
+
+files = sorted(Path(sys.argv[1]).glob("*.py"))
+known = sys.stdlib_module_names | {f.stem for f in files}
+for file in files:
+    for node in ast.walk(ast.parse(file.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            names = [a.name for a in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+            names = [node.module] if node.module else []
+        else:
+            continue
+        for name in names:
+            if name.split(".")[0] not in known:
+                print(f"{file.name}:{node.lineno}: {name.split('.')[0]}")
+"""
+
+
+def _unknown_imports(
+    directory: Path, bin_dir: Path
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [bin_dir / "python3", "-I", "-c", _IMPORT_CHECK, str(directory)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+
+
+def test_hooks_import_only_the_floors_stdlib(
+    python3_dir: Callable[[str], Path],
+) -> None:
+    # The floor test probes one path per guard; an import inside a function
+    # on an unprobed path would pass it, and the venv the tests run under
+    # has third-party packages that would satisfy the import anyway. Checked
+    # against 3.10's stdlib, a function-level ``tomllib`` (3.11+) shows too.
+    result = _unknown_imports(_ROOT / "hooks", python3_dir("3.10"))
+    assert (result.returncode, result.stdout) == (0, ""), result.stdout
+
+
+def test_the_import_check_names_what_is_not_stdlib_or_a_sibling(
+    tmp_path: Path, python3_dir: Callable[[str], Path]
+) -> None:
+    (tmp_path / "a.py").write_text("import json\n", encoding="utf-8")
+    (tmp_path / "b.py").write_text(
+        "import a\n\n\ndef f():\n"
+        "    import tomli\n"
+        "    from tomllib import loads\n",
+        encoding="utf-8",
+    )
+    result = _unknown_imports(tmp_path, python3_dir("3.10"))
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["b.py:5: tomli", "b.py:6: tomllib"]
 
 
 def test_session_context_is_injected_verbatim(tmp_path: Path) -> None:

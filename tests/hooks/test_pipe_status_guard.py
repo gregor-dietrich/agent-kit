@@ -13,29 +13,17 @@ are therefore symmetric: the traps are denied, and ordinary browsing is not
 off.
 """
 
-import json
-import os
-import subprocess
 from pathlib import Path
 
 import pytest
+from bash_hook import run_bash_hook
 
 _ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _ROOT / "hooks" / "pipe-status-guard.sh"
 
 
 def _run_hook(command: str, shell: str = "/bin/zsh") -> str:
-    payload = {"tool_name": "Bash", "tool_input": {"command": command}}
-    result = subprocess.run(
-        ["bash", str(_HOOK)],
-        input=json.dumps(payload),
-        capture_output=True,
-        text=True,
-        check=True,
-        timeout=30,
-        env={**os.environ, "SHELL": shell},
-    )
-    return result.stdout
+    return run_bash_hook(_HOOK, command, SHELL=shell)
 
 
 def _denied(command: str, shell: str = "/bin/zsh") -> bool:

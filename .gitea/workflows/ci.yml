@@ -1,6 +1,6 @@
-# One job: devkit's repository gates, then the tests, through the same
-# targets the pre-push hook runs locally. `make lint-repo` syncs .venv
-# from uv.lock first, bootstrapping the pinned uv when the runner has none.
+# One job: devkit's Python and repository gates, then the tests.
+# `make lint` syncs .venv from uv.lock first, through lint-shell,
+# installing the pinned uv hash-verified when devkit's cache lacks it.
 # Actions are pinned by commit SHA; the comment names the tag it resolved
 # from.
 name: ci
@@ -49,7 +49,7 @@ jobs:
             ~/.cache/uv
           key: wheels-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('uv.lock') }}
           restore-keys: wheels-${{ runner.os }}-${{ runner.arch }}-
-      - run: make lint-repo
+      - run: make lint
       - run: make test
       - if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.wheels.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

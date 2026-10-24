@@ -464,9 +464,7 @@ def test_codex_appended_draft_is_allowed(tmp_path: Path) -> None:
 def test_codex_appended_accepted_entry_is_denied(tmp_path: Path) -> None:
     _decisions_file(tmp_path)
     body = (
-        "@@ ## ADR-0001 — a draft\n"
-        "+## ADR-0003 — new\n"
-        "+**Status:** Accepted\n"
+        "@@ ## ADR-0001 — a draft\n+## ADR-0003 — new\n+**Status:** Accepted\n"
     )
     assert _denied(_patch(tmp_path, body))
 
@@ -816,5 +814,3 @@ def test_an_edit_through_a_symlink_is_vetted(tmp_path: Path) -> None:
     link.symlink_to(doc)
     payload = _edit(link, "**Status:** Proposed", "**Status:** Accepted")
     assert _denied(payload)
-
-

@@ -1,20 +1,16 @@
-# devkit's common.mk brings help, check, hooks, gate and the repository
-# gates (lint-repo). Its python-uv.mk is not included: install and test
-# stay this project's own, as is lint-shell.
+# devkit's common.mk and python-uv.mk bring the targets; this project
+# adds lint-shell, shellcheck over every tracked *.sh, to lint-repo,
+# and keeps test syncing .venv first.
 PROJECT := agent-kit
+COVERAGE_FLOOR := 91
 DEVKIT := $(shell ./devkitw path)
 ifeq ($(DEVKIT),)
 $(error devkitw failed; see its message above)
 endif
 include .devkit/make/common.mk
+include .devkit/make/python-uv.mk
 
-.PHONY: install test
-
-install: ## Sync .venv from uv.lock (bootstraps the pinned uv if missing)
-	@scripts/install.sh
-
-test: install ## Run the test suite
-	.venv/bin/pytest
+test: install
 
 .PHONY: lint-shell
 lint-repo: lint-shell

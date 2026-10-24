@@ -31,7 +31,7 @@ def _lint_repo_rules() -> tuple[int, str, list[str]]:
         check=False,
         timeout=60,
     )
-    rules = re.findall(r"^lint-repo:(.*)$", made.stdout, re.M)
+    rules = re.findall(r"^lint-repo:(.*)$", made.stdout, re.MULTILINE)
     return made.returncode, made.stderr, rules
 
 

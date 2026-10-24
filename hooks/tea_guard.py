@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """PreToolUse guard (Bash): tea single-entity reads must fetch comments.
 
 ``tea issues <n>`` and ``tea pr <idx>`` look complete while silently

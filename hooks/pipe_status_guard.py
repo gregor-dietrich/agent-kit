@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """PreToolUse guard (Bash): never read an exit status through a pipe.
 
 ``make test | tail -5`` reports **tail's** exit status, not the gate's, so a
@@ -322,7 +321,9 @@ def _unreadable_pipefail_mention(raw: str, parsed_lines: int) -> bool:
     guard cannot read is never blocked.
     """
     lines = sum(1 for ln in strip_heredocs(raw).split("\n") if ln.strip())
-    return lines > parsed_lines and bool(re.search("pipe_?fail", raw, re.I))
+    return lines > parsed_lines and bool(
+        re.search("pipe_?fail", raw, re.IGNORECASE)
+    )
 
 
 def main() -> None:

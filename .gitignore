@@ -1,6 +1,10 @@
 /.venv/
+# Left by the pre-devkit uv bootstrap; anchored-match parses untracked *.py.
 /.uv-bootstrap/
 __pycache__/
 /.pytest_cache/
 /.devkit
 /.plans/
+/.coverage
+/.coverage.*
+/.test-python/
