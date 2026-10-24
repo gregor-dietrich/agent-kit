@@ -2,12 +2,14 @@
 
 One definition of the hook wire format instead of a hand-maintained copy per
 hook: the stdin payload parse — which fails OPEN, because an absent or
-malformed payload must never block a tool call — the PreToolUse deny
+malformed hook payload must never block a tool call — the PreToolUse deny
 envelope, the path resolution for Claude edits and Codex patches, and the
 shell tokenizer every Bash guard reads commands with. Import as a sibling
 module (``import hook_lib``; hooks run by path, so this directory is already
 on ``sys.path``).
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -214,7 +216,7 @@ def effective_tool(name: str, args: list[str]) -> tuple[str, list[str]]:
 
 
 def read_payload() -> dict[str, Any]:
-    """The tool-invocation payload from stdin; exits 0 when there is none."""
+    """The hook payload from stdin; exits 0 when there is none."""
     try:
         data: Any = json.load(sys.stdin)
     except (json.JSONDecodeError, OSError, AttributeError):
@@ -241,15 +243,18 @@ def deny(reason: str) -> NoReturn:
 
 
 # The interpreter is whatever python3 the client finds first on PATH, not
-# the test venv's, and the PEP 604 unions below (`str | None`) are evaluated
-# when their def runs: under 3.9 importing this module raised, the hook
-# crashed, and a crashed PreToolUse hook fails OPEN — every guard allowed.
-# Every entry point imports this module before defining anything of its
-# own, so this check, placed before the first such def, is what each one
-# hits instead. A payload it cannot read still passes, as everywhere.
+# the test venv's, and the PEP 604 unions below (`str | None`) would be
+# evaluated when their def runs: under 3.9 importing this module raised, the
+# hook crashed, and a crashed PreToolUse hook fails OPEN — every guard
+# allowed. `from __future__ import annotations` defers them, so the import
+# reaches this check on any 3.7+; the check, placed before the first def of
+# a hook's own, is what each entry point hits instead. A payload it cannot
+# read still passes, as everywhere, and so does a SessionStart hook's, which
+# has no tool call to refuse.
 FLOOR = (3, 10)
 if sys.version_info < FLOOR:
-    read_payload()
+    if read_payload().get("hook_event_name") == "SessionStart":
+        sys.exit(0)
     deny(
         f"agent-kit's hooks need Python {FLOOR[0]}.{FLOOR[1]} or newer, but "
         f"python3 here is {sys.version.split()[0]} ({sys.executable}). Put "

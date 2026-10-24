@@ -16,11 +16,11 @@ full context cost, none of the earned specificity, and — worst — rules
 whose premises were never tested there.
 
 So the kit is deliberately small, and almost none of it is always on:
-one short SessionStart note, three guard hooks, and skills that load when
-their task comes up. It carries the _method_ (mechanize the convention;
-state what would falsify the decision; give every finding a terminal
-destination) and leaves the _instances_ to accrete in each project the
-way the originals did.
+one short SessionStart note, three guard hooks, a session temp-dir pruner,
+and skills that load when their task comes up. It carries the _method_
+(mechanize the convention; state what would falsify the decision; give
+every finding a terminal destination) and leaves the _instances_ to
+accrete in each project the way the originals did.
 
 **Copy the volume and you get cargo cult. Copy the method and you get a
 setup that grows the way the original did.**
@@ -32,6 +32,7 @@ setup that grows the way the original did.**
 | `hooks/pipe_status_guard.py` | Denies reading a gate's exit status through a pipe (`make test \| tail`) | Any repository, either shell; gate list covers make, pytest, Maven, Gradle, npm/pnpm, cargo, go and more |
 | `hooks/tea_guard.py` | Denies a `tea` single issue/PR read without `--comments` | Gitea/`tea` only; silent everywhere else |
 | `hooks/decisions_status_guard.py` | An agent may draft and amend decisions-log entries but not ratify, de-ratify or delete them | Repositories with a `docs/decisions.md` in the format below; a no-op elsewhere |
+| `hooks/prune_session_tmp.py` | At every session start, in a detached background child, removes Claude Code session temp dirs under `claude-<uid>` untouched for 4 days, never the current or a running session. Tracks Claude Code internals as of 2.1.310 and stops pruning silently if they move | Linux; macOS unverified (#73); inert below Python 3.10 |
 | `hooks/hook_lib.py` | Shared plumbing: payload parse, deny envelope, shell tokenizer, Claude and Codex path resolution | Internal |
 | `hooks/session-context.md` | The four delegation rules that hold on every dispatch, injected at session start | Any repository |
 | `skills/delegation` | Pinned-dispatch policy, per-client pins, the judgment threshold, cost reports | Any repository |
@@ -96,7 +97,9 @@ reaches Codex from a Claude Code session.
 The hooks run under the first `python3` on `PATH` and need 3.10 or newer.
 Under an older one — the Command Line Tools `python3` on macOS is 3.9 —
 each guard refuses every call that reaches it, with a message naming the
-floor, rather than crashing and so letting everything through.
+floor, rather than crashing and so letting everything through. The pruner,
+a SessionStart hook with no call to refuse, exits quietly and prunes
+nothing, so under that `python3` it is inert.
 
 ### Codex bridge (opt-in)
 
@@ -128,7 +131,8 @@ So a guard broken by a bad edit is not loud, it is inert, and you find out
 when the thing it guarded against happens again. Every hook here is pinned
 by tests of what it denies _and_ of what it deliberately lets through, and
 `hooks.json` by a test that runs each registered command the way the
-clients do and requires a deny. Change a hook only with its tests.
+clients do: each guard must deny, and the pruner must remove a stale
+session. Change a hook only with its tests.
 
 ## Known limits
 

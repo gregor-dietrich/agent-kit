@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,12 @@ def _script(command: str) -> Path:
     return _ROOT / "hooks" / match.group(1)
 
 
+def _registered(name: str) -> str:
+    """The one registered command that runs hooks/*name*."""
+    [command] = [c for _, _, c in _registrations() if _script(c).name == name]
+    return command
+
+
 @pytest.mark.parametrize(("event", "matcher", "command"), _registrations())
 def test_every_registered_script_exists_and_is_executable(
     event: str, matcher: str, command: str
@@ -57,6 +64,7 @@ def test_the_guards_are_wired_to_the_tools_they_guard() -> None:
     }
     assert wired == {
         ("SessionStart", "", "session-context.sh"),
+        ("SessionStart", "", "prune_session_tmp.py"),
         ("PreToolUse", "Bash", "pipe-status-guard.sh"),
         ("PreToolUse", "Bash", "tea-guard.sh"),
         ("PreToolUse", "Write|Edit|apply_patch", "decisions_status_guard.py"),
@@ -209,7 +217,7 @@ def python3_dir(
     return fetch
 
 
-@pytest.mark.parametrize("version", ["3.9", "3.10"])
+@pytest.mark.parametrize("version", ["3.8", "3.9", "3.10"])
 @pytest.mark.parametrize(("event", "matcher", "command"), _GUARDS)
 def test_the_registered_command_holds_the_python_floor(
     event: str,
@@ -292,7 +300,7 @@ def test_the_import_check_names_what_is_not_stdlib_or_a_sibling(
 
 
 def test_session_context_is_injected_verbatim(tmp_path: Path) -> None:
-    [(_, _, command)] = [r for r in _registrations() if r[0] == "SessionStart"]
+    command = _registered("session-context.sh")
     result = subprocess.run(
         ["sh", "-c", command],
         cwd=tmp_path,
@@ -317,3 +325,76 @@ def test_session_context_stays_small() -> None:
         encoding="utf-8"
     )
     assert len(context) <= 1200
+
+
+_SESSION = "00000000-0000-4000-8000-00000000000{}"
+
+
+def _run_pruner(base: Path, path_prefix: Path | None = None) -> Path:
+    """Run the registered pruner on a stale session and the current one.
+
+    Returns the stale one; the current one must outlive every run. The
+    registry it consults is an empty directory, not this machine's.
+    """
+    root = base / f"claude-{os.getuid()}"
+    root.mkdir(exist_ok=True)
+    root.chmod(0o700)  # as Claude Code makes it, whatever the umask
+    sessions = root / "-proj"
+    for n in (0, 1):
+        (sessions / _SESSION.format(n)).mkdir(parents=True, exist_ok=True)
+        os.utime(sessions / _SESSION.format(n), (0, 0))
+    env = {
+        **os.environ,
+        "CLAUDE_PLUGIN_ROOT": str(_ROOT),
+        "CLAUDE_CODE_TMPDIR": str(base),
+        "CLAUDE_CONFIG_DIR": str(base / "config"),
+    }
+    if path_prefix is not None:
+        env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
+    result = subprocess.run(
+        ["sh", "-c", _registered("prune_session_tmp.py")],
+        cwd=base,
+        env=env,
+        input=json.dumps(
+            {
+                "hook_event_name": "SessionStart",
+                "session_id": _SESSION.format(1),
+            }
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert (result.returncode, result.stdout) == (0, ""), result.stderr
+    return sessions / _SESSION.format(0)
+
+
+def _gone(path: Path) -> bool:
+    """Whether *path* disappears within a generous wait for the child."""
+    deadline = time.monotonic() + 20
+    while path.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return not path.exists()
+
+
+def test_the_pruner_removes_a_stale_session_in_the_background(
+    tmp_path: Path,
+) -> None:
+    # Smoke only: that it returns cleanly (_run_pruner) and that the
+    # detached child finishes the job. What it keeps is pinned in process,
+    # deterministically, in test_prune_session_tmp.py.
+    assert _gone(_run_pruner(tmp_path))
+
+
+@pytest.mark.parametrize("version", ["3.8", "3.9", "3.10"])
+def test_the_pruner_holds_the_python_floor(
+    version: str, tmp_path: Path, python3_dir: Callable[[str], Path]
+) -> None:
+    # A SessionStart hook has no call to deny: below the floor it exits
+    # quietly, which _run_pruner checks (status 0, empty stdout: an import
+    # crash would not give that), and it forks nothing, so the stale dir is
+    # still there when the hook has exited; at the floor it prunes.
+    stale = _run_pruner(tmp_path, python3_dir(version))
+    below = tuple(map(int, version.split("."))) < hook_lib.FLOOR
+    assert stale.is_dir() if below else _gone(stale)

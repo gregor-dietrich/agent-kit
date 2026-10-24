@@ -7,6 +7,11 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/session-context.sh\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/prune_session_tmp.py\"",
+            "timeout": 5
           }
         ]
       }

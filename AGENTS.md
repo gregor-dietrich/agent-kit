@@ -11,7 +11,7 @@ that can break silently.
 | ---- | ---------- |
 | `.claude-plugin/` | Claude Code plugin manifest, and the marketplace manifest that makes this repo installable |
 | `.codex-plugin/plugin.json` | The Codex twin: same name and version, plus Codex's `interface` block |
-| `hooks/` | `hooks.json` (read by both clients), the guard scripts it registers, and `session-context.md`, the only text injected into every session |
+| `hooks/` | `hooks.json` (read by both clients), the guard scripts and the session temp-dir pruner it registers, and `session-context.md`, the only text injected into every session |
 | `skills/` | One `<name>/SKILL.md` per skill, shared by both clients |
 | `agents/` | Generic role definitions; each pins its model per client in its frontmatter: `model:` for Claude Code, which runs them as agent types, `codex-model` and `codex-effort` for Codex, whose steering loop spawns them (delegation skill, "Pins by client"). code-reviewer's `codex-sandbox` is the review bridge's alone. |
 | `scripts/` | `codex-agent.sh`, the opt-in Codex bridge ai-review Stage 1c fires |
@@ -28,7 +28,8 @@ that can break silently.
   any payload they cannot parse. Never block a call you cannot read.
   They run under the user's `python3`, not the 3.13 test venv, so hook
   code stays within `hook_lib.FLOOR` (3.10); below it every guard denies,
-  naming the floor.
+  naming the floor, and a SessionStart hook, which has no call to
+  refuse, exits quietly.
   A call a guard _has_ read, that targets what it protects but whose
   effect it cannot model (a patch it cannot simulate, an Edit whose
   `old_string` it cannot locate), is denied: passing it is the bypass.
