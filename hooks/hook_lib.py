@@ -45,7 +45,7 @@ PATCH_MOVE = re.compile(r"^\*\*\* Move to: (.+?)[ \t\r]*$", re.MULTILINE)
 
 # Shells whose `-c` argument IS the command text, and the combined
 # short-option spelling of that flag (`-lc`, `-ic`, `-euc`, …).
-_SHELL_WRAPPERS = {"sh", "bash", "zsh", "dash", "ksh", "ash"}
+SHELL_WRAPPERS = {"sh", "bash", "zsh", "dash", "ksh", "ash"}
 _SHELL_C_FLAG = re.compile(r"-[A-Za-z]*c")
 
 SEPARATORS = {";", "&", "|", "&&", "||", ";;", "|&"}
@@ -278,7 +278,7 @@ def _wrapper_script(parts: list[str]) -> str | None:
     tokenize for, so ``["bash", "-lc", "make test | tail -5"]`` would still
     read as a single opaque token.
     """
-    if len(parts) < 3 or os.path.basename(parts[0]) not in _SHELL_WRAPPERS:
+    if len(parts) < 3 or os.path.basename(parts[0]) not in SHELL_WRAPPERS:
         return None
     for i, tok in enumerate(parts[1:-1], start=1):
         if _SHELL_C_FLAG.fullmatch(tok):

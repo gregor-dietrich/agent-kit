@@ -410,3 +410,168 @@ def test_gate_behind_a_prefix_program_is_denied() -> None:
 def test_unbalanced_quotes_fail_open() -> None:
     # An unparseable command is never blocked (every hook here fails open).
     assert not _denied("make test | tail -5 'unclosed")
+
+
+# --- reads that hide behind a keyword, a group, a wrapper or a filter -------
+#
+# Each of these reads a gate's status through a filter that succeeds whatever
+# the gate did, or hides the gate from a first-word check.
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "if make test | tail; then echo ok; fi",
+        "if true; then :; elif make test | tail; then :; fi",
+        "while make test | tail; do :; done",
+        "until make test | tail; do :; done",
+        "if git log | head; then :; fi",
+    ],
+)
+def test_a_pipeline_read_by_a_condition_is_denied(command: str) -> None:
+    assert _denied(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "(make test) | tail",
+        "(cd x && make test) | tail",
+        "x=$(make test | tail)",
+        "make test | (cat)",
+        "(make test)| tail",
+        "x=$( (cd sub && make test) | tail )",
+        "( x=$(pwd); make test ) | tail",
+    ],
+)
+def test_a_subshells_last_command_starts_the_pipeline(command: str) -> None:
+    assert _denied(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "while read l; do make test | tail; done < f",
+        "if true; then make test | tail; fi",
+        "if false; then :; else make test | tail; fi",
+    ],
+)
+def test_a_gated_pipeline_in_a_body_is_denied(command: str) -> None:
+    assert _denied(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "timeout 600 make test | tail",
+        "timeout 10m make test | tail",
+        "timeout 1.5s make test | tail",
+        "timeout -k 5s 10 make test | tail",
+        "timeout -s KILL 10 make test | tail",
+        "timeout --signal=KILL --preserve-status 10 make test | tail",
+        "timeout 600 uv run pytest | tail",
+        "xargs make < f | tail",
+        "xargs -n 1 -I {} make {} < f | tail",
+        "sh ./gradlew test | tail",
+        "bash x.sh | tail",
+        "timeout 5 bash ./gradlew test | tail",
+        "xargs -- make < f | tail",
+    ],
+)
+def test_a_gate_behind_a_wrapper_or_shell_is_denied(command: str) -> None:
+    assert _denied(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "./test.sh | tail",
+        "test.sh | tail",
+        "ci/run.sh | tail",
+        "npx playwright test | tail",
+    ],
+)
+def test_any_shell_script_and_npx_are_gates(command: str) -> None:
+    assert _denied(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "make test | wc -l",
+        "make test | sort",
+        "make test | sed 1d",
+        "make test | cut -c1-80",
+        "make test | uniq",
+        "make test | tr -d x",
+        "cat a | sort > b && wc -l b",
+    ],
+)
+def test_text_filters_that_succeed_whatever_the_gate_did_are_denied(
+    command: str,
+) -> None:
+    assert _denied(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "(git log) | head",
+        "git log | wc -l",
+        "echo $(git log | head)",
+        "timeout 5 git log | head",
+        "timeout -s | head",
+        "timeout 5s | head",
+        "xargs -n 1 echo < f | sort",
+        "bash x.sh > out.log 2>&1",
+        "bash -c 'make test' | head",
+        "cat f | while read l; do :; done",
+        "while read l; do git log | head; done < f",
+        "git log | (head)",
+        "if grep -q x f; then :; fi",
+        # The same two with a `|`, so the prefilter lets Python judge them.
+        "bash x.sh 2>&1 | grep -q ok && echo ok",
+        "if grep -q x f | grep -q y; then :; fi",
+        # A substitution's words are not the outer command's.
+        "ls $(go env GOPATH)/bin | head",
+        "ls $(npm root -g) | head",
+        "du -sh $(uv cache dir) | sort",
+        "cat $(./find-log.sh) | tail",
+        # Only the first command is unwrapped: this `sed` is xargs's.
+        "rg -l foo | xargs sed -i 's/foo/bar/g' && git diff",
+        "grep -rl a . | xargs sed -i s/a/b/ && git diff",
+        # `sort -c` answers whether its input is sorted.
+        "cmd | sort -C && echo sorted",
+        "cmd | sort -uc && echo sorted",
+        "cmd | sort --check=quiet || echo unsorted",
+    ],
+)
+def test_browsing_and_unreadable_wrappers_stay_allowed(command: str) -> None:
+    assert not _denied(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git push origin $(git branch --show-current) | tail -5",
+        "pytest $(git diff --name-only -- tests) | tail",
+        "ruff check $(git ls-files '*.py') | tail",
+        "{ make test | tail; }",
+        "! make test | tail",
+    ],
+)
+def test_a_gate_with_a_substitution_or_group_is_denied(command: str) -> None:
+    assert _denied(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "{ make test; } | tail",
+        'for t in a b; do make "$t"; done | tail',
+    ],
+)
+def test_documented_accepted_risks_pass(command: str) -> None:
+    # Seeing these needs a depth count over openers, closers, case patterns
+    # and parentheses; the module docstring names them as accepted risks.
+    assert not _denied(command)
