@@ -8,7 +8,8 @@ Execute a closed spec: **$ARGUMENTS**
 
 (If no arguments were given, look for a plan matching the conversation's
 target — a `<proposed_plan>` block in the conversation, or a file in
-`.plans/` — and confirm it before dispatching. With neither a plan nor a
+`.plans/` other than a `wrap-up-*.md` report — and confirm it before
+dispatching. With neither a plan nor a
 settled design, stop — see "When this skill applies".)
 
 ## Why this skill exists

@@ -146,6 +146,11 @@ design", "use the agreed wording"): it must point at text in the plan or
 at a durable source ("The plan"). The scratchpad, task files and dispatch
 returns are session-local and do not count.
 
+It also traces the plan both ways: every work item traces to the target
+or the testing story, and the testing story covers every work item. An
+orphan in either direction is removed or justified, because untraced work
+items are where scope grows unnoticed.
+
 ### Stage 5 — Cost report
 
 Report per the `agent-kit:delegation` skill, "Cost observability",

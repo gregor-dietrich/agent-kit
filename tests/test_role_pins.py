@@ -261,6 +261,31 @@ def test_each_dispatching_skill_points_at_the_pin_contract(
             "The question states what a pick authorises",
             id="next-names-what-a-pick-authorises",
         ),
+        pytest.param(
+            "skills/wrap-up/SKILL.md",
+            "Nothing is edited or filed unapproved.",
+            id="wrap-up-waits-for-approval",
+        ),
+        pytest.param(
+            "skills/wrap-up/SKILL.md",
+            "`**Status:** Proposed` and never Accepted",
+            id="wrap-up-never-accepts-a-decision",
+        ),
+        pytest.param(
+            "skills/wrap-up/SKILL.md",
+            "is never applied from another project's session",
+            id="wrap-up-keeps-kit-items-in-the-kit",
+        ),
+        pytest.param(
+            "skills/plan-create/SKILL.md",
+            "An orphan in either direction is removed or justified",
+            id="plan-self-review-traces-work-items",
+        ),
+        pytest.param(
+            "skills/design-exploration/SKILL.md",
+            "rests on a read in this session",
+            id="plan-claims-rest-on-a-read",
+        ),
     ],
 )
 def test_safety_anchor_survives(path: str, anchor: str) -> None:

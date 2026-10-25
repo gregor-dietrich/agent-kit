@@ -114,6 +114,13 @@ placeholder or TBD, any two sections that contradict each other, any
 requirement admitting two readings, and any scope that has quietly grown
 past one implementation.
 
+Every statement about the current code (a line, its present text, a
+behaviour) rests on a read in this session, its own or a dispatched
+agent's, not on memory, an issue's or comment's description of it, or an
+earlier plan: a plan built on a
+remembered or paraphrased line sends a writing agent to code that is not
+there.
+
 If the decision is load-bearing — it constrains future work, or a later
 reader would otherwise relitigate it — and passes the three tests below,
 it becomes a decisions-log entry, in the shape that log defines:
