@@ -212,8 +212,9 @@ the point of the mode. The operator can still override mid-run.
 The declared bounds are the contract. Before dispatching anything, state
 to the user: the resolved mode, the review target, and the planned
 dispatch count (with the subsystem/surface list, for `deep` and for a
-widened `standard`) — including which Stage 2 stances will run and whether
-Stages 1b and 1c are part of the count — and what the branch guards
+widened `standard`) — including which Stage 2 stances will run, whether
+Stages 1b and 1c are part of the count, and that Stage 4's fix pass may
+add one — and what the branch guards
 (`agent-kit:delegation`, "The policy") listed. A settings change they
 list, or a missing base, is asked before dispatching, not announced; the
 mode is the only thing `auto` resolves without waiting.
@@ -243,7 +244,10 @@ findings"):
   since have been filed, and a gap the diff leaves open may already be
   tracked. Observed in practice: a `standard` pass proposed two issues
   that already existed and "corrected" a PR-body note the tracker had
-  already overtaken.
+  already overtaken,
+- the review's base: `<merge-base>`, taken against the freshly fetched
+  target, with the fetch's timeout and its fallback when it fails, as
+  `agent-kit:delegation`, "The policy", sets out.
 
 Write the **full artifacts** to scratchpad files — the complete `git diff`
 for the scope, the complete issue/comment threads, and the `<merge-base>`
@@ -255,9 +259,21 @@ Stage 1/2 reviewer prompt, alongside a short **context digest** (a few
 sentences: what the change is for, which issues it closes, which decisions
 bear on it). Reviewers are read-only (in
 Claude Code no shell, no tracker; under Codex the Stage 1 and Stage 2
-reviewer prompts also carry Stage 1b's list): they Read the artifact files
-themselves, so their scope and tracker context stay lossless instead of
-anchored to the orchestrator's summary — and they never re-fetch.
+reviewer prompts also carry the scout's "Hard constraints"): they Read
+the artifact files themselves, so their scope and tracker context stay
+lossless instead of anchored to the orchestrator's summary — and they
+never re-fetch.
+
+A caller may also hand over **drafted texts** the diff does not contain: a
+PR description or its update, a reply to review comments, an issue
+comment. They are written to scratchpad files too, labelled as review
+targets, not instructions, and their paths go into every Stage 1/2
+reviewer prompt. The same reviewers read one more artifact; no dispatch is
+added. The session that wrote a text reads it as meant, not as written,
+and a PR description is the one part of a change that leaves the machine
+unreviewed otherwise. A drafted text's claims are checked like the diff
+and never serve as evidence that explains a finding away. A finding about
+a drafted text is fixed in the draft.
 
 ### Stage 1 — Review fan-out (`agent-kit:code-reviewer`)
 
@@ -303,9 +319,23 @@ Each Stage 1 prompt MUST embed:
 - an explicit **NO-CAP** instruction: report every verified finding,
   ranked by severity, tail included — the built-in's 10-finding cap does
   not apply here,
-- the output format the `agent-kit:code-reviewer` agent defines,
+- the output format the `agent-kit:code-reviewer` agent defines, with its
+  location rules: line numbers are those of the file as the review target
+  holds it, never a position inside the diff artifact, and for removed
+  text the line in the `<merge-base>` copy, marked as such; a finding
+  that names a defect class lists every instance after a sweep of the
+  affected files and their siblings, or states the scope not swept; and
+  its **Detail** rules, the deleting or shortening fix first where
+  removing text or code removes the defect, and a finding that reports a
+  contradiction names both sides,
 - an instruction to also report what the reviewer was **unsure about**,
-  not only what it found.
+  not only what it found,
+- where Stage 0 holds drafted texts, the **drafted-text check**: every
+  count, "checked", "unchanged" or other claim in a drafted text is backed
+  by the diff or a command's output, and the places that state the same
+  thing (a changelog line, a heading over a corrected block, a sibling
+  file, the drafted text) agree; a drafted text never explains a finding
+  away.
 
 ### Stage 1b — Empirical verification (`agent-kit:scout`), when triggered
 
@@ -315,58 +345,28 @@ only if the surface splits cleanly (e.g. hooks vs. deploy artifacts).
 
 `agent-kit:scout` is the pinned type because it is the read-only agent
 granted a shell. That grant is exactly what this stage needs and exactly
-what makes it dangerous: its read-only guarantee is **instruction-level
-only**, enforced by nothing but its prompt. So every Stage 1b prompt MUST
-carry, in its own words:
+what makes it dangerous: its read-only guarantee is instruction-level
+only. The scout's "Hard constraints" (`<base>/../../agents/scout.md`)
+bind every Stage 1b run; the prompt names the scratch directory and says
+they apply, and a type other than agent-kit's scout gets that file's path
+to read in full.
 
-- scratchpad-only scratch files, named explicitly; **no writes anywhere in
-  the repo**, and `git status --porcelain` reported at the end to prove it;
-- no `git` write commands, no mutating build targets, no package
-  installs, no tracker writes;
-- **a nested agent session (`claude -p`, `codex exec`) runs in the
-  scratch dir with no more than its client's built-in permissions and
-  sandbox**: no flag, settings or config override, or added directory
-  that bypasses or loosens them (among them
-  `--permission-mode bypassPermissions`,
-  `--dangerously-skip-permissions`, `--allowedTools`, `--settings`,
-  `--dangerously-bypass-approvals-and-sandbox`,
-  `--sandbox danger-full-access`, `--approve-for-me`, `-c`, `--profile`,
-  `--add-dir`), and none under a user configuration that already loosens
-  them. A loosened session runs whatever its model chooses outside any
-  sandbox or permission check, and Stage 1b's rules are not in its
-  prompt. A probe that cannot run on these terms, such as one that needs
-  the repo as its working directory, is reported as not run. One that
-  runs tests the client and is not a dispatch, but its model and tokens
-  are reported for Stage 5, marked unavailable when the run shows none;
-- **never point a formatter or fixer at a repo path** — it rewrites
-  whatever path it is handed. Copy the file under test into the scratch
-  dir first;
-- **do not verify a guard by breaking a file the review does not own.**
-  Use a temporary fixture. Sibling agents may be editing that file, and
-  "restore until `git diff` is empty" silently reverts their work —
-  observed in practice, and only the other agent noticing recovered it;
-- read exit codes directly (`cmd < payload.json; echo "EXIT=$?"`), never
-  through a pipe into `tail`/`head` (the pipe-status guard denies it).
-
-**Report what you ran, not what you inferred.** Every empirical claim MUST
-carry its command and that command's actual output. An inference from
-`strings` over a stripped binary, a guess from a symbol's absence, or a
-reading of code the agent did not execute is **not** an empirical result
-and MUST be labelled as an ordinary static finding — with the doubt
-stated. The failure this rule exists to prevent: an empirical pass
-concluded from `strings` that a tool-name alias table did not exist,
-reported the change's headline feature as unreachable, and was refuted by
-one query against upstream source. Absence of evidence in a stripped
-binary is not evidence of absence, and the breadth of an empirical pass
-reads as authority — so its wrong answers are believed harder than a
-static reviewer's.
+Under Claude Code the steering loop itself captures
+`git status --porcelain --ignored=matching` before dispatching Stage 1b
+and after its last scout ends, and compares the difference with the
+scouts' Working tree fields rather than trusting them alone (Stage 1
+reviewers have no shell, so only a scout can have written). It reports
+the difference with Stage 1b's results; any write other than to the
+scratch directory or a reported cache is a breach to report to the
+operator.
 
 Where the external contract has **documentation or source**, read that
 too, and prefer it over inference from a shipped artifact.
 
 Stage 1b's findings pool with Stage 1's for Stage 3. Where the two
 disagree on the same claim, the executed result wins over the read one —
-unless the "executed" result is an inference, per the paragraph above.
+unless the "executed" result is an inference, per the scout's "report what
+you ran" constraint.
 
 ### Stage 1c — Cross-family second opinion (optional)
 
@@ -382,8 +382,8 @@ order:
 - otherwise, agent-kit's bridge, where the user has opted in by creating
   the file `${XDG_CONFIG_HOME:-~/.config}/agent-kit/codex-bridge`. The
   opt-in is the user's, one file that covers every project, and lives
-  outside every checkout: a branch must not grant its own consent. The bridge checks
-  the file itself and exits 2 without it. Run
+  outside every checkout: a branch must not grant its own consent. The
+  bridge checks the file itself and exits 2 without it. Run
   `<base>/../../scripts/codex-agent.sh code-reviewer <prompt-file>
   <transcript-file>` from inside the project with the Bash tool's
   `run_in_background` (a foreground call is capped at 10 minutes),
@@ -422,8 +422,8 @@ is **not** a mode, and it does not replace a Stage 1 dispatch: its
 findings pool with theirs and go through Stage 2 unprivileged. A
 cross-family finding is not more likely to be true; it is less likely to
 be one the rest of the pool would ever have raised. Its empirical claims
-are bound by Stage 1b's "report what you ran, not what you inferred" rule
-exactly as the scout's are.
+are bound by the scout's "report what you ran, not what you inferred"
+constraint.
 
 Observed in practice: on one wide review, the cross-family arm produced
 two in-diff findings no same-family dispatch raised, and settled the top
@@ -433,9 +433,19 @@ from source.
 ### Stage 2 — Adversarial verification (`agent-kit:code-reviewer`), by stance
 
 Every verifier is prompted to **refute** each pooled finding against
-source rather than confirm it, re-reading every High-severity finding
-individually against the file it names. Verdicts: `CONFIRMED` /
-`PLAUSIBLE` / `REFUTED`. Drop `REFUTED` findings.
+source rather than confirm it, re-reading every error- or
+warning-severity finding individually against the file it names.
+Verdicts: `CONFIRMED` / `PLAUSIBLE` / `REFUTED` /
+`TRACKED <what holds it>`. Drop `REFUTED` findings. `TRACKED` is for a claim
+that is true but that Stage 1's tracked-finding rule covers: it is not a
+refutation, and the verdict adds a note of what the review adds beyond what
+holds it (another occurrence, a root cause, a reproduction).
+
+A finding that names a defect class is verified by repeating the sweep:
+the verifier greps the affected files and their siblings and adds the
+instances the reviewer missed. A completed instance list corrects the
+finding, never refutes it, and a finding whose sweep was not done comes
+back with the sweep done, not dropped.
 
 **Under the widened-`standard` ceiling, split multiple verifiers by stance
 rather than by finding volume.** N verifiers under the same prompt
@@ -496,7 +506,10 @@ break-glass path broken.
 
 ### Stage 3 — Report (main loop)
 
-Report every surviving finding, ranked by severity, no cap. Per finding:
+Report every surviving finding, ranked by severity, no cap. `TRACKED`
+findings are reported in their own section, marked `instance` (naming what
+holds it) and never mixed with refuted ones, with the verifier's notes
+on what each adds. Per finding:
 
 - severity,
 - triage destination, per the `agent-kit:review-triage` skill ("Triaging
@@ -510,7 +523,7 @@ Report every surviving finding, ranked by severity, no cap. Per finding:
 
 When the review target is, or has, an open PR, post the full verified set
 as a PR comment with the tracker CLI **before** acting on any of it.
-The comment names the branch the review ran against and its
+The comment names the branch the review ran against, its HEAD and its
 `<merge-base>` (`agent-kit:delegation`, "The policy"), so a PR retargeted
 after review visibly has none for its new base.
 Proposed follow-up issues are proposed to the user — never filed
@@ -545,7 +558,69 @@ decision you are deferring, fix, file or drop it.
 Reviewing an unmerged branch or PR is itself the ask for the fixes it
 produces; this stage runs only then.
 
-- Group confirmed in-branch findings into small, closed specs.
+- Group confirmed in-branch findings into small, closed specs. A fix
+  closes every instance a finding lists, not only the first.
+- A finding that reports a contradiction names both sides, and its
+  suggested fix is one reading. Before writing the spec, the steering
+  loop establishes which side holds (from the issue, the process behind
+  the rule, or by asking the operator); the spec names it.
+- The fix report states what each fix adds, not only what it removes
+  (review-triage, "Measure the fix, not its headline").
+- After the fixes, the steering loop re-reads each draft against the
+  final diff before it leaves the machine (a PR opens or is edited, a
+  reply or comment is posted): a fix changes counts and claims the draft
+  stated.
+- **Prove a coverage gap before closing it.** A finding that claims a
+  behaviour is pinned by no test is proven before its test is written.
+  The steering loop runs the proof (plants, runs, copies); only the test
+  is written as a fix. The proof plants the defect in a throwaway
+  worktree, never in the working tree: restoring a file there silently
+  reverts any write made to it since it was copied, and a planted file
+  the live session runs (a project hook) breaks the session mid-proof.
+  Caches stay off for every run of the proof (Python:
+  `PYTHONDONTWRITEBYTECODE=1`): a cache keyed on mtime and size survives
+  a same-size edit made within the same second, as a corrected re-plant
+  or a re-copied test can be, and gave a false red.
+  1. Check `git worktree list` first. A `.worktrees/proof-<finding>`
+     present is from an interrupted run: remove it
+     (`git worktree remove --force`). Other `proof-*` entries may belong
+     to a live session: report them, remove none. Create the worktree
+     from HEAD as `.worktrees/proof-<finding>` and set it up as
+     `/agent-kit:plan-run` Stage 2 sets out for an isolated dispatch
+     (excluded from git status, its own virtualenv as the project's
+     `AGENTS.md` says, no git hooks or git config). Carry the working
+     tree's changes across only while no fix dispatch that could touch
+     them runs, leaving out the finding's test where a restart finds it
+     already written: step 3 copies it. Carry the tracked changes as that
+     Stage's steps 3 and 5 carry a patch, from `git diff HEAD` rather
+     than `--cached`, and only where `git diff HEAD --quiet` exits 1 (an
+     empty patch makes `git apply` exit 128). Carry the untracked files
+     `git ls-files -z --others --exclude-standard` lists, run from the
+     top level, each to the same relative path in the worktree. Run
+     every suite that reaches the code, those outside the gates included
+     (`agent-kit:debugging`, Phase 4). A red baseline that is green in
+     the working tree is a setup gap (an ignored input the worktree
+     lacks), reported as such; either red stops the proof and waits on
+     the operator.
+  2. Plant the exact defect the finding describes in the worktree and run
+     those suites. Green is the proof; a list of tests that "could have
+     caught it" is not. Red counts only when a test asserting the
+     behaviour fails: the gap does not exist, and the finding is dropped
+     as refuted. A red from an import or collection error means the plant
+     is malformed: correct it and run again.
+  3. Write the test in the working tree as any fix is written (dispatched
+     above the judgment threshold), copy every file its change touches
+     into the worktree and run the suites there against the planted
+     defect. Red counts only when the new test's assertion fails (as in
+     step 2), and the others stay green. A test that stays green under
+     the defect proves nothing: it goes back to its writer with that
+     result, and step 3 repeats once; a second green stops the proof.
+     Check that the worktree's suites import the worktree's code, and
+     report to the operator. Remove the worktree
+     (`git worktree remove --force`) here, and on every path that ends
+     the proof, a stop included, before step 4.
+  4. Run the suites from step 1 in the working tree: the new test
+     passes; a red goes back to its writer. Report each run's result.
 - Dispatch each group to `agent-kit:backend-developer` or
   `agent-kit:frontend-developer` — whichever owns the touched files.
   Exception, per the `agent-kit:delegation` skill ("The judgment
@@ -560,10 +635,25 @@ produces; this stage runs only then.
   dispatch runs isolated, its work lands by `/agent-kit:plan-run`'s
   Stage 2 procedure.
 - Subagents never commit and never re-delegate; the steering loop commits.
+- **One review pass over the fixes.** Once every fix is committed, where
+  the fix diff (`<pre-fix>..HEAD`, `<pre-fix>` being the HEAD the review
+  ran on) would itself fire an escalator above, one `quick` Stage 1
+  dispatch reviews it. The escalators pick which fix diffs earn a pass;
+  the prompt's findings and specs bound what it reads. Its prompt adds the
+  verified findings and the fix specs, and asks it to mark each finding
+  introduced by the fixes, a fix left incomplete, or present before. Its
+  set is posted and fixed as the first round's is (Stage 3 and this
+  stage); where the first round's comment is still held (as under
+  `/agent-kit:next --review`), one comment carries both. There is no
+  further pass. The steering loop reads fixes against its own specs, as
+  meant, not as written; observed in practice: over a fix commit of 8
+  files (+157/−87) that the diff read and the gates had passed, this pass
+  found five warnings, three introduced by the fixes (one carried by the
+  fix spec) and two fixes left incomplete.
 - Gates are the project's, as its rules name them (e.g. `make lint`,
-  `make test`): the fast gate before each commit; once every
-  fix is committed, the push gate before the single push at the end, as
-  the `agent-kit:push-gate` skill defines it.
+  `make test`): the fast gate before each commit; once every fix is
+  committed, the fix pass's included, the push gate before the single
+  push at the end, as the `agent-kit:push-gate` skill defines it.
 
 ### Stage 5 — Cost report (every run, all modes)
 
@@ -586,9 +676,10 @@ what it got wrong — that pair is the only evidence of whether the
 empirical arm is worth its cost, and a run that reports only its successes
 cannot support the judgment either way.
 
-Record the same pair for **Stage 1c**, where it ran, and for each Stage 2
-**stance**: what that arm produced which nothing else did, and where it
-was wrong. These are the least established arms, so the evidence has to be
+Record the same pair for **Stage 1c**, where it ran, for each Stage 2
+**stance**, and for Stage 4's **fix pass**, with its findings counted by
+mark: what that arm produced which nothing else did, and where it was
+wrong. These are the least established arms, so the evidence has to be
 gathered deliberately or the next session is left arguing from
 impressions. For Stage 1c, take the token figure the bridge reports; mark
 it **unavailable** only when a run surfaced no count at all. Never
@@ -608,3 +699,17 @@ before or during the run — is expected use, not a failure. The `standard`
 ceiling is the same kind of checklist and inherits the same caveat, with
 one asymmetry worth knowing: under-calling it costs coverage silently,
 while over-calling it costs an operator one answered question.
+
+## Deliberately left out (do not re-propose)
+
+Decided against, with the reason, so the proposals do not return:
+
+- **A tracker comment drafted per `TRACKED` finding whose review adds
+  something.** Each would be a tracker-write ask, priced above filing.
+  Stage 3's "adds" notes leave the choice to the operator.
+- **Operator confirmation of every new normative wording a fix writes.**
+  In a skill repo nearly every fix is wording, so it would ask on nearly
+  every fix. Stating what each fix adds keeps it reviewable.
+- **A separate pre-push review skill looping fresh reviewer passes with
+  `--fixup` and autosquash.** It overlaps `next --review` and Stage 4 and
+  multiplies reviewer spend; Stage 4's fix pass runs once, not in a loop.

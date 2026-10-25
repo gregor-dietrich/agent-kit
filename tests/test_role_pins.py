@@ -226,9 +226,20 @@ def test_each_dispatching_skill_points_at_the_pin_contract(
             id="review-comment-names-its-base",
         ),
         pytest.param(
-            "skills/ai-review/SKILL.md",
+            "agents/scout.md",
             "with no more than its client's built-in permissions and sandbox",
             id="empirical-probe-keeps-permissions",
+        ),
+        pytest.param(
+            "agents/scout.md",
+            "## Hard constraints",
+            id="scout-keeps-its-hard-constraints-heading",
+        ),
+        pytest.param(
+            "agents/scout.md",
+            "`git status --porcelain --ignored=matching` at the start and"
+            " again at the end of every run",
+            id="scout-captures-the-working-tree",
         ),
         pytest.param(
             "skills/plan-create/SKILL.md",

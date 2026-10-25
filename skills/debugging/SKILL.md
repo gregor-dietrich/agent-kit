@@ -91,12 +91,16 @@ guess presented as a diagnosis is worse than no diagnosis.
 
 1. **The failing test comes first** wherever the defect is expressible as
    a test, and it MUST fail for the right reason before the fix lands —
-   otherwise you have not shown it tests the bug. A regression test
-   follows your normal test conventions like any other. Some real defects
-   are not expressible: a wrong URL or a stale enumeration in a doc, or an
-   operator-facing comment in a shipped config file. There, say plainly
-   that no test can express it and verify the fix directly instead — the
-   honest exit, not a licence to skip a test that could have been written.
+   otherwise you have not shown it tests the bug. For a coverage gap,
+   where the code already behaves, plant the defect to show it
+   (`agent-kit:ai-review`, Stage 4, "Prove a coverage gap before closing
+   it"). A regression test follows your normal test conventions like any
+   other.
+   Some real defects are not expressible: a wrong URL or a stale
+   enumeration in a doc, or an operator-facing comment in a shipped config
+   file. There, say plainly that no test can express it and verify the fix
+   directly instead — the honest exit, not a licence to skip a test that
+   could have been written.
    A defect in code your coverage config deliberately omits is **not** one
    of those cases: an omit takes code out of the coverage gate, not out of
    testing. Its regression test lands in whatever suite reaches that code

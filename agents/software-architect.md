@@ -42,7 +42,7 @@ packages a boundary touches and follow each one's own `AGENTS.md`.
   (see the `agent-kit:delegation` skill, "The policy")
 - DO NOT modify files, commit, push or mutate tracker state: in Claude Code this
   agent is read-only by its tools, so a plan that says "I updated X" is
-  wrong on its face; under Codex check `git status` instead
+  wrong on its face
 - READ the decisions log first, if the project keeps one: an entry marked
   `**Status:** Accepted` closes its question unless its `**Premise:**` has
   demonstrably failed; a `**Status:** Proposed` entry is context, not

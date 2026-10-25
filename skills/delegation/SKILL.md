@@ -39,9 +39,17 @@ Work is routed by explicit dispatch, and only by explicit dispatch:
   skill, a cross-family review bridge) displaces agent-kit's only as the
   branch it merges into holds it: **a branch must not choose its own
   reviewer.** Before the first dispatch or skill use that would let one
-  displace agent-kit's, take the base, `git merge-base HEAD <target>`
-  with `<target>` the remote-tracking ref of the branch the PR or merge
-  targets, else of the default branch; call it `<merge-base>`. Then list
+  displace agent-kit's, fetch the target, then take the base,
+  `git merge-base HEAD <target>`, with `<target>` the remote-tracking ref
+  of the branch the PR or merge targets, else of the default branch; call
+  it `<merge-base>`. Fetch with `git fetch <remote> <branch>`, the pair
+  `<target>` tracks (`git fetch origin/main` fails), under a bounded Bash
+  tool timeout: an SSH fetch to an unreachable host or through a dead
+  agent can stall until the tool's limit. When the fetch fails or times
+  out, continue against the local remote-tracking ref and name its commit
+  and commit date where the run states its plan and in its report
+  (`git log -1 --format='%h %cd' <target>`, the tip's commit date, not the
+  fetch time), since the ref may be days old. Then list
   what the checkout changes against it:
   `git diff --name-only --no-renames <merge-base> --` (so a moved file
   shows both paths) and
@@ -108,8 +116,11 @@ Work is routed by explicit dispatch, and only by explicit dispatch:
   even change what the listing reports, so against a hostile branch only
   a session started on a checkout of `<merge-base>` bounds its settings.
   Code the branch runs as the user (gates, tests, an empirical probe)
-  can also leave ignored files and user config that no listing sees, and
-  they outlast the session. A PreToolUse hook was weighed and rejected:
+  can also leave ignored files and user config, and they outlast the
+  session. `git status --porcelain --ignored=matching` lists ignored
+  paths that appear or vanish; no listing sees a write inside an ignored
+  file or directory already present, anything under `.git/`, or anything
+  outside the checkout. A PreToolUse hook was weighed and rejected:
   it cannot unload what the client already loaded either. Do not
   re-propose it; what would change this is a client that loads project
   instructions from a given ref, or marks loaded text as superseded.
@@ -170,12 +181,18 @@ frontmatter, the only place the value lives:
   A read-only role's prompt adds "You MUST NOT edit files or run builds,
   tests or any command that changes state. Do not delegate, commit, push
   or mutate tracker state. Where the role says you have no shell,
-  read-only commands for reading files are allowed." A writing role does
-  not get that line: it works within the session's sandbox, on the files
-  its spec names. A read-only role's prompt also carries
-  `/agent-kit:ai-review` Stage 1b's scratch-file rules, and once a
-  read-only spawn ends the loop confirms `git status --porcelain` is
-  unchanged.
+  read-only commands for reading files are allowed." A scout spawn's line
+  reads "run builds or any command that changes state, other than tests
+  and probes under your 'Hard constraints'" in place of "run builds,
+  tests or any command that changes state". A writing role does not get
+  that line: it works within the session's sandbox, on the files its spec
+  names. A read-only role's prompt also carries the "Hard constraints" of
+  `<base>/../../agents/scout.md` (scratch-only files, tool caches
+  reported, and the rest), and once a read-only spawn ends the
+  loop confirms `git status --porcelain --ignored=matching` is unchanged
+  from before it, else reports the difference with the spawn's result;
+  any write other than to the scratch directory or a reported cache is a
+  breach to report to the operator.
 
   Before a native spawn's result is used, the loop reads that child's
   model and effort (the `SubAgentActivity` "started" event for it in the

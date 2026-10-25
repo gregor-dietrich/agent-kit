@@ -30,7 +30,8 @@ as CI runs them.
 Judge the class from everything the branch carries into its target, not
 the last commit and not what this session edited:
 `git diff --name-only --no-renames <base>...HEAD`, where `<base>` is the
-branch the PR or merge targets, freshly fetched (e.g. `origin/main`).
+branch the PR or merge targets (e.g. `origin/main`), fetched first with
+the timeout and fallback of `agent-kit:delegation`, "The policy".
 Never diff against the branch's own upstream (`@{u}`): that range holds
 only the commits since the last push. `--no-renames` so a moved file
 shows both paths. Where the tree is not clean (verifying before a

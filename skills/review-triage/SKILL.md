@@ -24,7 +24,9 @@ where marks apply (see "Mark each finding novel or instance" and
 "Scope" below). When the two are written as one verdict, they leave the
 same trace: a duplicate of a known class looks like a refuted claim, and
 it vanishes from the novel/instance count that is the only signal of
-whether the review loop still finds new classes.
+whether the review loop still finds new classes. The verifier's verdict
+for such a claim is `TRACKED`, not `REFUTED` (`agent-kit:ai-review`,
+Stage 2).
 
 Comments are the part most often missed, and tracker CLIs omit them from
 some single-entity reads. With `tea`, every single-issue/PR view but
@@ -143,6 +145,13 @@ destination. A "one-line rename" that ten assertions select on is not a
 one-line fix; a "dead code" finding may be a one-line delete. Both
 directions are common, and the cheap check — grep for what depends on the
 thing — takes seconds.
+
+A fix is measured by what it adds as well as what it removes: a sentence
+"corrected" with a qualifier often leaves a new inaccuracy. A finding
+that reports a contradiction names both sides and suggests one reading;
+establish which side holds, from the issue, the process behind the rule,
+or by asking, before removing either, or the correct rule is silently
+deleted. A fix closes every instance the finding lists.
 
 ### Every finding reaches a terminal destination
 

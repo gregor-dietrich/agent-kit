@@ -194,10 +194,11 @@ Then, for each PR:
 
 1. **Branch** without upstream tracking (e.g.
    `git switch --no-track -c <branch> <remote>/<base>`) from a freshly
-   fetched tip of the default branch, or from the earlier PR's branch when
-   the PR is stacked, unless Stage 0 found a local branch carrying this
-   PR's leftover plan commits, which is resumed instead of branching
-   fresh. Use one branch per PR.
+   fetched tip of the default branch (the fetch's timeout and fallback are
+   as `agent-kit:delegation`, "The policy", sets out), or from the earlier
+   PR's branch when the PR is stacked, unless Stage 0 found a local branch
+   carrying this PR's leftover plan commits, which is resumed instead of
+   branching fresh. Use one branch per PR.
 2. **Execute** the bundle with `/agent-kit:plan-run`, on its plan or, for
    settled items, on the issues themselves. For a PR that mixes items
    needing a plan with settled ones, its plan-create run carries the
@@ -214,15 +215,19 @@ Then, for each PR:
    this session already holds instead of letting it re-fetch: the bundle's
    issues with their comments, the plan, next's Stage 0 tracker reads, and
    the draft PR description, including any unverified assumption it will
-   state. ai-review's Stage 4 stops at its last fix commit: its push gate
-   and push are step 4's, run once. No PR exists yet, so hold the findings
-   comment ai-review would post. In-branch findings are fixed before the
-   push. A proposal that would change what is pushed holds the push until
-   the operator answers it. Any other proposal goes into the end-of-turn
-   text and does not hold the push.
+   state. The draft is also a review target (`/agent-kit:ai-review`,
+   Stages 0, 1 and 4), re-read in step 4. ai-review's Stage 4 stops at its
+   last fix commit: its push gate and push are step 4's, run once. No PR
+   exists yet, so hold the findings comment ai-review would post.
+   In-branch findings are fixed before the push. A proposal that would
+   change what is pushed holds the push until the operator answers it.
+   Any other proposal goes into the end-of-turn text and does not hold the
+   push.
 4. **Push and open the PR**, as `/agent-kit:plan-run` Stage 4 sets out
-   (the push gate, one push, the description, the plan record). Push the
-   branch to its own name with an explicit refspec (e.g.
+   (the push gate, one push, the description, the plan record); under
+   `--review`, once the push gate has run, re-read the draft against the
+   final diff and that result before the PR opens. Push the branch to its
+   own name with an explicit refspec (e.g.
    `git push -u <remote> HEAD:refs/heads/<branch>`), never force: a
    rejected push stops that PR and is reported. The description states the
    PR's review status: either reviewed by `--review`, with the review's
