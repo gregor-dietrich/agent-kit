@@ -23,13 +23,19 @@ already **tracks** is not a false positive: the claim is true; it simply
 already has a destination. An issue tracks a finding while it is open,
 is not one the change under review closes, and states the finding's
 claim in its body or a comment, as read: matched on a title alone, the
-tracking is unverified until the issue is read. An issue never
-**accepts** a finding: it holds work still to be done, and its body's
-word is no decision. Only an Accepted decision, or a convention or known
-cost the project's files record with its rationale, accepts one (see
-"Settled decisions are not findings"). A tracked or accepted finding is
-not re-raised, but it stays in the report as a stated drop that names
-what holds it, marked `instance` where marks apply (see "Mark each
+tracking is unverified until the issue is read. An issue never tracks a
+defect the diff introduces or makes reachable, whatever it states: it
+tracks only what the review's `<merge-base>` (`agent-kit:delegation`,
+"The policy") already holds. Such a defect is fixed in-branch unless a
+ground in "What may be dropped" other than tracking holds it; where its
+fix is a design an open issue holds, it goes to the operator, never
+dropped as tracked. An issue never **accepts** a finding: it holds work
+still to be done, and its body's word is no decision. Only an Accepted
+decision, or a convention or known cost the project's files record with
+its rationale, accepts one (see "Settled decisions are not findings").
+A tracked or accepted finding is not re-raised, but it stays in the
+report as a stated drop that names what holds it, marked `instance`
+where marks apply (see "Mark each
 finding novel or instance" and "Scope" below). When it and a false
 positive are written as one verdict, they leave the same trace: a
 duplicate of a known class looks like a refuted claim, and it vanishes
@@ -159,10 +165,10 @@ reviewer, names the run instead). The scout's "Hard constraints"
 (`<base>/../../agents/scout.md`, `<base>` being this skill's base
 directory) bind the run either way: made by the loop itself in the
 scratch directory, or by a scout it dispatches and checks as
-`agent-kit:ai-review` Stage 1b does. A finding
-reaches the user only once its facts are measured, or when measuring is
-expensive, irreversible or needs access the loop lacks; then say which,
-and what the run would have been.
+`agent-kit:ai-review` Stage 1b does. A finding reaches the user only once
+its facts are measured, or when measuring is expensive, irreversible or
+needs access the loop lacks; then say which, and what the run would have
+been.
 
 ### Measure the fix, not its headline
 
@@ -231,13 +237,16 @@ none of them is a filing.
   cheap to verify** is not a destination: the check is run first
   ("Asking has a cost too"), then the finding is routed.
 - **Already tracked or accepted elsewhere.** True, but not novel —
-  tracked by an open tracker issue the change does not close, or
-  accepted by an Accepted decision or a convention or known cost
-  recorded with its rationale; an issue never accepts one. See "Gather
-  context before finalizing findings" and "Settled decisions are not
-  findings" for why this is not a refutation and how to mark it.
-- **Won't-fix.** True, and the change is declined on its merits. The
-  test is **would you decline this fix if it were free?**
+  tracked by an open tracker issue the change does not close, for a
+  finding about what `<merge-base>` already holds (never a defect the
+  diff introduces or makes reachable), or accepted by an Accepted
+  decision or a convention or known cost recorded with its rationale; an
+  issue never accepts one. See "Gather context before finalizing
+  findings" and "Settled decisions are not findings" for why this is not
+  a refutation and how to mark it.
+- **Won't-fix.** True, and the change is declined on its merits, never
+  on a tracker thread's word. The test is **would you decline this fix
+  if it were free?**
 
 Won't-fix carries a **conditional** documentation duty, not an automatic
 one. Record it only where a later session would plausibly **re-derive it

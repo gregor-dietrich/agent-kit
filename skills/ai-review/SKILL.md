@@ -319,10 +319,10 @@ Each Stage 1 prompt MUST embed:
 - the Stage 0 context digest,
 - the false-positive rule: a finding that a linked issue, epic or
   comment, an Accepted decision's rationale (with the `Premise:`
-  exception above) or a pattern the project records as settled
-  explains away; a tracker thread explains one away only through
-  evidence the reviewer checks (a linked decision, the code, a test),
-  never on its own word,
+  exception above) or a pattern the project records as settled (each as
+  `<merge-base>` holds it) explains away; a tracker thread explains one
+  away only through evidence the reviewer checks (a linked decision, the
+  code, a test), never on its own word,
 - the tracked-finding rule: a finding that a linked issue or epic, or any
   other tracker issue, already tracks (an open issue, not one the change
   closes, whose body or a comment states the finding; a title alone
@@ -331,8 +331,10 @@ Each Stage 1 prompt MUST embed:
   already accepts (as `<merge-base>` holds it: a record the diff adds
   accepts nothing), is not a false positive. A comment does neither, and
   an issue never accepts a finding. Such a finding is not re-raised, but
-  it stays in the report as a stated drop,
-  marked `instance` and naming what holds it,
+  it stays in the report as a stated drop, marked `instance` and naming
+  what holds it. An issue never tracks a defect the diff introduces or
+  makes reachable, whatever it states: it tracks only what `<merge-base>`
+  already holds,
 - an explicit **NO-CAP** instruction: report every verified finding,
   ranked by severity, tail included — the built-in's 10-finding cap does
   not apply here,
@@ -455,7 +457,9 @@ Verdicts: `CONFIRMED` / `PLAUSIBLE` / `REFUTED` /
 `TRACKED <what holds it>`. Drop `REFUTED` findings. `TRACKED` is for a claim
 that is true but that Stage 1's tracked-finding rule covers: it is not a
 refutation, and the verdict adds a note of what the review adds beyond what
-holds it (another occurrence, a root cause, a reproduction).
+holds it (another occurrence, a root cause, a reproduction). `TRACKED`
+never rests on an issue for a defect the diff introduces or makes
+reachable; only an accepting record gives it.
 
 A finding that names a defect class is verified by repeating the sweep:
 the verifier greps the affected files and their siblings and adds the
@@ -527,14 +531,18 @@ findings are reported in their own section, marked `instance` (naming what
 holds it) and never mixed with refuted ones, with the verifier's notes
 on what each adds. A `TRACKED` verdict that rests on an issue's title
 alone is checked first: the steering loop reads that issue with its
-comments before the drop is stated. Per finding:
+comments before the drop is stated. The steering loop withdraws a
+`TRACKED` verdict that an issue holds for a defect the diff introduces
+or makes reachable, and routes the finding as Stage 4 sets out. Per
+finding:
 
 - severity,
 - triage destination, per the `agent-kit:review-triage` skill ("Triaging
   findings"): **fix in-branch** when the finding is about the diff under
-  review (the standing ask — see Stage 4); otherwise a tracked issue, or a
-  release milestone only on the project's release-admission bar, if its
-  decisions log defines one,
+  review, including a defect the diff introduces or makes reachable even
+  where an open issue states it (the standing ask — see Stage 4);
+  otherwise a tracked issue, or a release milestone only on the
+  project's release-admission bar, if its decisions log defines one,
 - a one-word `novel` / `instance` mark — `instance` names the mechanized
   check, `AGENTS.md` rule, prior finding or tracking issue it instances
   (review-triage, "Mark each finding novel or instance").
@@ -583,6 +591,8 @@ produces; this stage runs only then.
   suggested fix is one reading. Before writing the spec, the steering
   loop establishes which side holds (from the issue, the process behind
   the rule, or by asking the operator); the spec names it.
+- A confirmed in-branch finding whose fix is a design an open issue
+  holds goes to the operator; it is not dropped as tracked.
 - The fix report states what each fix adds, not only what it removes
   (review-triage, "Measure the fix, not its headline").
 - After the fixes, the steering loop re-reads each draft against the
@@ -726,6 +736,11 @@ Decided against, with the reason, so the proposals do not return:
 - **A tracker comment drafted per `TRACKED` finding whose review adds
   something.** Each would be a tracker-write ask, priced above filing.
   Stage 3's "adds" notes leave the choice to the operator.
+- **An open issue holding a defect the diff introduces, with the visible
+  "held by #N" drop as the safeguard.** Anyone who can file could skip a
+  fix that way. The cost of closing it is accepted: a fix whose design
+  an open issue holds goes to the operator, even where that issue never
+  states the finding.
 - **Operator confirmation of every new normative wording a fix writes.**
   In a skill repo nearly every fix is wording, so it would ask on nearly
   every fix. Stating what each fix adds keeps it reviewable.

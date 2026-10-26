@@ -259,6 +259,72 @@ def test_each_dispatching_skill_points_at_the_pin_contract(
             id="reviewer-title-match-is-unverified",
         ),
         pytest.param(
+            "skills/review-triage/SKILL.md",
+            "An issue never tracks a defect the diff introduces or makes"
+            " reachable",
+            id="triage-in-diff-defect-never-tracked",
+        ),
+        pytest.param(
+            "skills/review-triage/SKILL.md",
+            "for a finding about what `<merge-base>` already holds",
+            id="triage-drop-ground-base-only",
+        ),
+        pytest.param(
+            "skills/review-triage/SKILL.md",
+            "it goes to the operator, never dropped as tracked",
+            id="triage-design-held-fix-goes-to-operator",
+        ),
+        pytest.param(
+            "skills/review-triage/SKILL.md",
+            "other than tracking holds it",
+            id="triage-in-diff-defect-routes-by-other-grounds",
+        ),
+        pytest.param(
+            "skills/review-triage/SKILL.md",
+            "never on a tracker thread's word",
+            id="triage-wont-fix-not-on-a-thread",
+        ),
+        pytest.param(
+            "skills/ai-review/SKILL.md",
+            "An issue never tracks a defect the diff introduces or makes"
+            " reachable",
+            id="review-in-diff-defect-never-tracked",
+        ),
+        pytest.param(
+            "skills/ai-review/SKILL.md",
+            "`TRACKED` never rests on an issue for a defect the diff"
+            " introduces or makes reachable",
+            id="review-verdict-in-diff-never-tracked",
+        ),
+        pytest.param(
+            "skills/ai-review/SKILL.md",
+            "The steering loop withdraws a `TRACKED` verdict that an issue"
+            " holds",
+            id="review-loop-withdraws-issue-held-tracked",
+        ),
+        pytest.param(
+            "skills/ai-review/SKILL.md",
+            "a pattern the project records as settled (each as `<merge-base>`"
+            " holds it) explains away",
+            id="review-false-positive-reads-base-records",
+        ),
+        pytest.param(
+            "skills/ai-review/SKILL.md",
+            "even where an open issue states it",
+            id="review-in-diff-finding-fixed-in-branch",
+        ),
+        pytest.param(
+            "skills/ai-review/SKILL.md",
+            "goes to the operator; it is not dropped as tracked",
+            id="review-design-held-fix-goes-to-operator",
+        ),
+        pytest.param(
+            "agents/code-reviewer.md",
+            "An issue never tracks a defect the diff introduces or makes"
+            " reachable",
+            id="reviewer-in-diff-defect-never-tracked",
+        ),
+        pytest.param(
             "skills/ai-review/SKILL.md",
             "an open issue, not one the change closes",
             id="review-tracking-issue-is-open",
