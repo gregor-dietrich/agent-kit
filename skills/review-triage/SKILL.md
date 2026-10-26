@@ -19,16 +19,24 @@ comment or file wrote them. A candidate finding that a linked issue, epic or
 comment **explains away**, through evidence checked (a linked decision,
 the code, a test) and never on its own word, is a **false positive** —
 drop it. One that a linked issue or epic, or any other tracker issue,
-already **accepts or tracks** is not a false positive: the claim is
-true; it simply already has a destination. It is not re-raised, but
-it stays in the report as a stated drop that names what holds it, marked
-`instance` where marks apply (see "Mark each finding novel or instance"
-and "Scope" below). When the two are written as one verdict, they leave the
-same trace: a duplicate of a known class looks like a refuted claim, and
-it vanishes from the novel/instance count that is the only signal of
-whether the review loop still finds new classes. The verifier's verdict
-for such a claim is `TRACKED`, not `REFUTED` (`agent-kit:ai-review`,
-Stage 2).
+already **tracks** is not a false positive: the claim is true; it simply
+already has a destination. An issue tracks a finding while it is open,
+is not one the change under review closes, and states the finding's
+claim in its body or a comment, as read: matched on a title alone, the
+tracking is unverified until the issue is read. An issue never
+**accepts** a finding: it holds work still to be done, and its body's
+word is no decision. Only an Accepted decision, or a convention or known
+cost the project's files record with its rationale, accepts one (see
+"Settled decisions are not findings"). A tracked or accepted finding is
+not re-raised, but it stays in the report as a stated drop that names
+what holds it, marked `instance` where marks apply (see "Mark each
+finding novel or instance" and "Scope" below). When it and a false
+positive are written as one verdict, they leave the same trace: a
+duplicate of a known class looks like a refuted claim, and it vanishes
+from the novel/instance count that is the only signal of whether the
+review loop still finds new classes.
+The verifier's verdict for such a claim is `TRACKED`, not `REFUTED`
+(`agent-kit:ai-review`, Stage 2).
 
 Comments are the part most often missed, and tracker CLIs omit them from
 some single-entity reads. With `tea`, every single-issue/PR view but
@@ -82,8 +90,12 @@ finding an Accepted entry's rationale shows to be false is a **false
 positive**. A true finding the entry accepts as a known cost (say, "N%
 of the tree is omitted from coverage" against a recorded omit policy) is
 not: it stays in the report as a stated drop that names the entry,
-marked `instance` where marks apply. The same holds for a convention
-the project's `AGENTS.md` records together with its rationale.
+marked `instance` where marks apply. The same holds for a convention or
+known cost the project's files record together with its rationale: its
+`AGENTS.md`, a rule or skill file, a script header. Such a record, like
+a decisions-log entry, counts as the review's `<merge-base>` copy holds
+it (`agent-kit:delegation`, "The policy"), so one the change under
+review adds accepts nothing.
 
 **Exception:** an entry carrying a **Premise:** line is closed only while
 that premise holds. A finding that shows the premise has failed is a real
@@ -218,10 +230,12 @@ none of them is a filing.
   not do that. Its counterpart is no ground at all: unverified **and
   cheap to verify** is not a destination: the check is run first
   ("Asking has a cost too"), then the finding is routed.
-- **Already tracked or accepted elsewhere.** True, but not novel — by a
-  tracker issue or an Accepted decision. See "Gather context before
-  finalizing findings" and "Settled decisions are not findings" for why
-  this is not a refutation and how to mark it.
+- **Already tracked or accepted elsewhere.** True, but not novel —
+  tracked by an open tracker issue the change does not close, or
+  accepted by an Accepted decision or a convention or known cost
+  recorded with its rationale; an issue never accepts one. See "Gather
+  context before finalizing findings" and "Settled decisions are not
+  findings" for why this is not a refutation and how to mark it.
 - **Won't-fix.** True, and the change is declined on its merits. The
   test is **would you decline this fix if it were free?**
 

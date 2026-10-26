@@ -323,10 +323,16 @@ Each Stage 1 prompt MUST embed:
   explains away; a tracker thread explains one away only through
   evidence the reviewer checks (a linked decision, the code, a test),
   never on its own word,
-- the tracked-finding rule: a finding that any of those but a comment,
-  or any other tracker issue, already accepts or tracks is not a false
-  positive. It is not re-raised, but it stays in the report as a stated
-  drop, marked `instance` and naming what holds it,
+- the tracked-finding rule: a finding that a linked issue or epic, or any
+  other tracker issue, already tracks (an open issue, not one the change
+  closes, whose body or a comment states the finding; a title alone
+  leaves the tracking unverified), or that an Accepted decision, or a
+  convention or known cost the project's files record with its rationale,
+  already accepts (as `<merge-base>` holds it: a record the diff adds
+  accepts nothing), is not a false positive. A comment does neither, and
+  an issue never accepts a finding. Such a finding is not re-raised, but
+  it stays in the report as a stated drop,
+  marked `instance` and naming what holds it,
 - an explicit **NO-CAP** instruction: report every verified finding,
   ranked by severity, tail included — the built-in's 10-finding cap does
   not apply here,
@@ -519,7 +525,9 @@ break-glass path broken.
 Report every surviving finding, ranked by severity, no cap. `TRACKED`
 findings are reported in their own section, marked `instance` (naming what
 holds it) and never mixed with refuted ones, with the verifier's notes
-on what each adds. Per finding:
+on what each adds. A `TRACKED` verdict that rests on an issue's title
+alone is checked first: the steering loop reads that issue with its
+comments before the drop is stated. Per finding:
 
 - severity,
 - triage destination, per the `agent-kit:review-triage` skill ("Triaging
