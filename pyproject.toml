@@ -15,7 +15,9 @@ dev = [
     "ruff>=0.17.2",
     # Only where it ships a wheel (uv.lock); never built, see below.
     "shellcheck-py>=0.11.0.1; sys_platform == 'darwin' or (sys_platform == 'linux' and platform_machine == 'x86_64') or (sys_platform == 'win32' and platform_machine == 'AMD64')",
-    "uv>=0.12.23",
+    # Security floor 0.13.4 (GHSA-hq85-5cpj-mr62): uv embeds its own CA
+    # bundle, which certifi does not reach.
+    "uv>=0.13.6",
     "vulture>=2.16",
 ]
 
