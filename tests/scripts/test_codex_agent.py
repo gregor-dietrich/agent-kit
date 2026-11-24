@@ -243,7 +243,7 @@ def test_verified_run_passes_the_pin_and_prints_the_message(
     role_file = bridge.kit / "agents" / "code-reviewer.md"
     assert stdin.startswith(
         f"Your role instructions are in {role_file}; read it in full. "
-        "Its model: and tools: frontmatter is Claude-only"
+        "Its model: and tools: frontmatter is client-specific"
     )
     assert "you have a read-only shell for reading files" in stdin
     assert "you MUST NOT run builds, tests" in stdin

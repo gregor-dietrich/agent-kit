@@ -169,7 +169,7 @@ SANDBOX="$(pin codex-sandbox)"
 [[ "$SANDBOX" == read-only ]] ||
 	die "codex-sandbox is $SANDBOX: no preamble for this sandbox yet."
 PREAMBLE="Your role instructions are in $ROLE_FILE; read it in full. \
-Its model: and tools: frontmatter is Claude-only and replaced by this \
+Its model: and tools: frontmatter is client-specific and replaced by this \
 run's configuration. Where its body says you have no shell or cannot run \
 commands, that does not hold here: you have a read-only shell for reading \
 files; you MUST NOT run builds, tests or any command that changes state. \

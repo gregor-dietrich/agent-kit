@@ -105,6 +105,37 @@ def _probe(matcher: str, script: str, root: Path) -> dict[str, Any]:
 _GUARDS = [r for r in _registrations() if r[0] == "PreToolUse"]
 
 
+def _run_guard_cmd(
+    command: str,
+    run_cwd: Path,
+    root: Path,
+    payload: dict[str, Any],
+    path_prefix: Path | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Run *command* on *payload* in a prepared repo under *root*."""
+    (root / ".git").mkdir()
+    (root / "docs").mkdir()
+    (root / "docs" / "decisions.md").write_text(
+        "## ADR-0001 — x\n\n**Status:** Proposed\n", encoding="utf-8"
+    )
+    env = {**os.environ, **(extra_env or {})}
+    if path_prefix is not None:
+        env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
+    result = subprocess.run(
+        ["sh", "-c", command],
+        cwd=run_cwd,
+        env=env,
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
 def _run_guard(
     matcher: str, command: str, root: Path, path_prefix: Path | None = None
 ) -> dict[str, Any]:
@@ -114,26 +145,15 @@ def _run_guard(
     *path_prefix* goes first on PATH, so its ``python3`` is the one both
     the prefilters and the ``env python3`` shebang find.
     """
-    (root / ".git").mkdir()
-    (root / "docs").mkdir()
-    (root / "docs" / "decisions.md").write_text(
-        "## ADR-0001 — x\n\n**Status:** Proposed\n", encoding="utf-8"
+    raw = _run_guard_cmd(
+        command,
+        root,
+        root,
+        _probe(matcher, _script(command).name, root),
+        path_prefix=path_prefix,
+        extra_env={"CLAUDE_PLUGIN_ROOT": str(_ROOT)},
     )
-    env = {**os.environ, "CLAUDE_PLUGIN_ROOT": str(_ROOT)}
-    if path_prefix is not None:
-        env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
-    result = subprocess.run(
-        ["sh", "-c", command],
-        cwd=root,
-        env=env,
-        input=json.dumps(_probe(matcher, _script(command).name, root)),
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
-    assert result.returncode == 0, result.stderr
-    decision: dict[str, Any] = json.loads(result.stdout)["hookSpecificOutput"]
+    decision: dict[str, Any] = raw["hookSpecificOutput"]
     assert decision["permissionDecision"] == "deny", decision
     return decision
 
@@ -405,3 +425,177 @@ def test_the_pruner_holds_the_python_floor(
     stale = _run_pruner(tmp_path, python3_dir(version))
     below = tuple(map(int, version.split("."))) < hook_lib.FLOOR
     assert stale.is_dir() if below else _gone(stale)
+
+
+# --- Antigravity root hooks.json --------------------------------------------
+
+_AGY_HOOKS: dict[str, Any] = json.loads(
+    (_ROOT / "hooks.json").read_text(encoding="utf-8")
+)["agent-kit"]
+_AGY_COMMAND = re.compile(r"^\./hooks/([\w.-]+)$")
+
+
+def _agy_registrations() -> list[tuple[str, str, str]]:
+    out: list[tuple[str, str, str]] = []
+    for handler in _AGY_HOOKS.get("SessionStart", []):
+        out.append(("SessionStart", "", handler["command"]))
+    for group in _AGY_HOOKS.get("PreToolUse", []):
+        matcher = group.get("matcher", "")
+        for handler in group["hooks"]:
+            out.append(("PreToolUse", matcher, handler["command"]))
+    return out
+
+
+def _agy_script(command: str) -> Path:
+    match = _AGY_COMMAND.fullmatch(command)
+    assert match, f"not a relative plugin-root hook command: {command}"
+    return _ROOT / "hooks" / match.group(1)
+
+
+_AGY_GUARDS = [r for r in _agy_registrations() if r[0] == "PreToolUse"]
+
+
+@pytest.mark.parametrize(("event", "matcher", "command"), _agy_registrations())
+def test_every_antigravity_script_exists_and_is_executable(
+    event: str, matcher: str, command: str
+) -> None:
+    script = _agy_script(command)
+    assert script.is_file(), script
+    assert os.access(script, os.X_OK), f"{script} lost its exec bit"
+
+
+def test_antigravity_guards_are_wired_to_the_tools_they_guard() -> None:
+    wired = {
+        (event, matcher, _agy_script(command).name)
+        for event, matcher, command in _agy_registrations()
+    }
+    assert wired == {
+        ("SessionStart", "", "session-context.sh"),
+        ("PreToolUse", "run_command", "pipe-status-guard.sh"),
+        ("PreToolUse", "run_command", "tea-guard.sh"),
+        (
+            "PreToolUse",
+            (
+                "write_file|edit_file|write_to_file|replace_file_content|"
+                "multi_replace_file_content|sed_file"
+            ),
+            "decisions_status_guard.py",
+        ),
+    }
+
+
+def _agy_probe(script: str, root: Path) -> dict[str, Any]:
+    log = root / "docs" / "decisions.md"
+    if script == "decisions_status_guard.py":
+        return {
+            "hookEventName": "PreToolUse",
+            "conversationId": "0000",
+            "cwd": str(root),
+            "toolCall": {
+                "name": "edit_file",
+                "args": {
+                    "Path": str(log),
+                    "Target": "**Status:** Proposed",
+                    "Replacement": "**Status:** Accepted",
+                },
+            },
+        }
+    command = {
+        "pipe-status-guard.sh": "make test | tail -5",
+        "tea-guard.sh": "tea issues 1",
+    }[script]
+    return {
+        "hookEventName": "PreToolUse",
+        "conversationId": "0000",
+        "cwd": str(root),
+        "toolCall": {
+            "name": "run_command",
+            "args": {"CommandLine": command},
+        },
+    }
+
+
+def _run_agy_guard(
+    command: str, root: Path, path_prefix: Path | None = None
+) -> dict[str, Any]:
+    # Antigravity runs plugin hooks with cwd = <plugin-root>.
+    decision = _run_guard_cmd(
+        command,
+        _ROOT,
+        root,
+        _agy_probe(_agy_script(command).name, root),
+        path_prefix=path_prefix,
+    )
+    assert decision["decision"] == "deny", decision
+    return decision
+
+
+@pytest.mark.parametrize(("event", "matcher", "command"), _AGY_GUARDS)
+def test_antigravity_registered_command_denies_end_to_end(
+    event: str, matcher: str, command: str, tmp_path: Path
+) -> None:
+    _run_agy_guard(command, tmp_path)
+
+
+@pytest.mark.parametrize("version", ["3.9", "3.10"])
+@pytest.mark.parametrize(("event", "matcher", "command"), _AGY_GUARDS)
+def test_antigravity_registered_command_holds_the_python_floor(
+    event: str,
+    matcher: str,
+    command: str,
+    version: str,
+    tmp_path: Path,
+    python3_dir: Callable[[str], Path],
+) -> None:
+    floor = f"need Python {hook_lib.FLOOR[0]}.{hook_lib.FLOOR[1]} or newer"
+    reason = _run_agy_guard(command, tmp_path, python3_dir(version))["reason"]
+    below = tuple(map(int, version.split("."))) < hook_lib.FLOOR
+    assert (floor in reason) == below, reason
+
+
+def test_antigravity_session_context_emits_inject_steps() -> None:
+    [command] = [
+        c
+        for ev, _, c in _agy_registrations()
+        if ev == "SessionStart" and _agy_script(c).name == "session-context.sh"
+    ]
+    result = subprocess.run(
+        ["sh", "-c", command],
+        cwd=_ROOT,
+        input=json.dumps(
+            {"hookEventName": "SessionStart", "conversationId": "0000"}
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    context = (_ROOT / "hooks" / "session-context.md").read_text(
+        encoding="utf-8"
+    )
+    assert payload == {
+        "injectSteps": [{"systemMessage": {"systemMessage": context}}]
+    }
+
+
+def test_antigravity_session_start_below_floor_exits_quietly(
+    python3_dir: Callable[[str], Path],
+) -> None:
+    env = {
+        **os.environ,
+        "PATH": f"{python3_dir('3.9')}{os.pathsep}{os.environ['PATH']}",
+    }
+    result = subprocess.run(
+        [str(_ROOT / "hooks" / "prune_session_tmp.py")],
+        env=env,
+        input=json.dumps(
+            {"hookEventName": "SessionStart", "conversationId": "0000"}
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert (result.returncode, result.stdout) == (0, ""), result.stderr

@@ -55,7 +55,8 @@ Work is routed by explicit dispatch, and only by explicit dispatch:
   shows both paths) and
   `git ls-files --others --exclude-standard --`, each run from the
   repository's top level over `.claude/agents`, `.claude/skills`,
-  `.claude/commands`, `.codex/agents` and, for a bridge the root
+  `.claude/commands`, `.codex/agents`, `.agents/agents`, `.agents/skills`
+  and, for a bridge the root
   `AGENTS.md` names, that file and the files it names. A reviewing
   definition on that list does not displace agent-kit's unless the user
   confirms it for this run: dispatch agent-kit's, and say which file and
@@ -70,8 +71,9 @@ Work is routed by explicit dispatch, and only by explicit dispatch:
   `.claude/rules`, `.agents`, the decisions log, every project skill or
   command (`.claude/skills`, `.claude/commands`), used or not, since the
   client loads their descriptions at start, every file the client loads
-  as project instructions (`AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`
-  and the like), nested ones included, and the files the `<merge-base>`
+  as project instructions (`AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`,
+  `GEMINI.md` and the like), nested ones included, and the files the
+  `<merge-base>`
   copy of any listed file imports, routes instructions to or names as
   instructions to follow, again from those files' `<merge-base>` copies,
   until no new file turns up. Add the `<merge-base>` target of every
@@ -97,7 +99,9 @@ Work is routed by explicit dispatch, and only by explicit dispatch:
   edits bind review once they merge.
 - Nor its reviewer's settings. List the checkout's changes as above
   over `.claude/settings.json`, `.claude/settings.local.json`,
-  `.mcp.json` and `.codex/config.toml` as well, and over every
+  `.mcp.json` and `.codex/config.toml` as well, plus Antigravity's
+  `.agents/hooks.json`, `.agents/mcp_config.json`, `.agents/plugins.json`,
+  `.agents/skills.json` and `.agents/rules.json`, and over every
   repository file their `<merge-base>` copies run or load: hook and MCP
   server commands, `statusLine` and `apiKeyHelper` commands, output
   styles. They carry hooks, permissions, MCP servers and environment,
@@ -164,12 +168,33 @@ Work is routed by explicit dispatch, and only by explicit dispatch:
 
 ## Pins by client
 
-Each agent-kit role file (`<base>/../../agents/<role>.md`, `<base>`
-being this skill's base directory) carries one pin per client in its
-frontmatter, the only place the value lives:
+Each agent-kit role carries one pin per client in its frontmatter, the
+only place the value lives (`<base>` being this skill's base directory):
 
-- **Claude Code** reads `model:`; naming the agent type applies it.
-- **Codex** reads `codex-model` and `codex-effort`. Codex plugins carry
+- **Claude Code** reads `model:` in `<base>/../../claude-agents/<role>.md`
+  (wired from `.claude-plugin/plugin.json`); naming the agent type applies
+  it.
+- **Antigravity** loads `<base>/../../agents/<role>.md` natively as plugin
+  subagents (`invoke_subagent`). Antigravity subagents accept only four
+  model tiers (`inherit`, `pro`, `flash`, `flash_lite`), not literal model
+  names: judgment roles (`code-reviewer`, `software-architect`) pin
+  `inherit` so they run on your active session model (for example
+  Orchestrator's planner/executor split, avoiding extra partner-model
+  quota draw), while exploration and writing roles (`scout`,
+  `backend-developer`, `frontend-developer`) pin `flash`. Under
+  Orchestrator mode, the steering loop already hands execution off to a
+  faster executor within a single turn, which complements the judgment
+  threshold below: keep small edits in the steering loop, and still
+  dispatch pinned agent-kit subagents for parallel exploration,
+  independent review and non-trivial closed specs where context isolation
+  and tool boundaries matter. `code-reviewer` and `software-architect`
+  omit shell and write tools from their `tools:` list (harness-enforced
+  read-only); `scout` holds `run_command` and is read-only by instruction
+  only. Built-in `self` and `research` subagents default to `inherit`:
+  dispatch agent-kit's custom types instead, or pass the closest role's
+  tier where a harness workflow forces a built-in.
+- **Codex** reads `codex-model` and `codex-effort` from
+  `<base>/../../agents/<role>.md`. Codex plugins carry
   no agent types, so a Codex steering loop dispatches a role by calling
   `spawn_agent` with `model` set to `codex-model` and `reasoning_effort`
   set to `codex-effort`, both explicitly; `fork_turns` set to `"none"`,
@@ -210,9 +235,11 @@ agent (`.codex/agents/<name>.toml`) counts as pinned when it sets both
 pointing at the file, and the read-only line where its role is read-only.
 A spawn applies neither its `sandbox_mode` nor anything else in it.
 
-`/agent-kit:ai-review`'s Stage 1c bridge is opt-in per user and
-verified per run; it is not how a Codex session delegates, and a Codex
-session's own spawns need no opt-in.
+`/agent-kit:ai-review`'s Stage 1c bridges (`scripts/agy-agent.sh` via
+`agy-model` and `scripts/codex-agent.sh` via `codex-*`, both in
+`<base>/../../agents/<role>.md`) are opt-in per user and verified per
+run; they are for cross-family second opinions, not how a client runs its
+own native subagents.
 
 Elsewhere, including "The policy" above, the wording is Claude Code's.
 Under Codex: a dispatch naming an agent type (`subagent_type`, the Agent
@@ -251,10 +278,13 @@ fix.
 
 A session that dispatched agents MUST report, at the end: agents spawned
 (per dispatch: agent type, client, model and effort run, and tokens) and
-totals. "Run" is what the run's own evidence shows: the pin Claude Code
-applied, the banner the Codex bridge verified, or for a Codex spawn the
-child's rollout under `$CODEX_HOME/sessions` (`$CODEX_HOME` defaults to
-`~/.codex`). Give every spawn in a session a unique `task_name`, and
+totals. "Run" is what the run's own evidence shows: the pin Claude Code applied,
+the model verified by a Stage 1c bridge (`agy-agent.sh` or
+`codex-agent.sh`), an Antigravity subagent's `transcript.jsonl` when
+readable (else the tier requested, marked unverified), or for a Codex
+spawn the child's rollout under `$CODEX_HOME/sessions` (`$CODEX_HOME`
+defaults to `~/.codex`). Give every spawn in a session a unique
+`task_name`, and
 match the rollout whose `session_meta` (each file's first line) has the
 parent thread as `parent_thread_id` and `/root/<task_name>` as
 `agent_path`, searching only the dated directories since the session

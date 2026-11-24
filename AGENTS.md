@@ -9,12 +9,15 @@ that can break silently.
 
 | Path | What it is |
 | ---- | ---------- |
-| `.claude-plugin/` | Claude Code plugin manifest, and the marketplace manifest that makes this repo installable |
+| `.claude-plugin/` | Claude Code plugin manifest (pointing `agents` at `claude-agents/`), and the marketplace manifest that makes this repo installable |
 | `.codex-plugin/plugin.json` | The Codex twin: same name and version, plus Codex's `interface` block |
-| `hooks/` | `hooks.json` (read by both clients), the guard scripts and the session temp-dir pruner it registers, and `session-context.md`, the only text injected into every session |
-| `skills/` | One `<name>/SKILL.md` per skill, shared by both clients |
-| `agents/` | Generic role definitions; each pins its model per client in its frontmatter: `model:` for Claude Code, which runs them as agent types, `codex-model` and `codex-effort` for Codex, whose steering loop spawns them (delegation skill, "Pins by client"). code-reviewer's `codex-sandbox` is the review bridge's alone. |
-| `scripts/` | `codex-agent.sh`, the opt-in Codex bridge ai-review Stage 1c fires |
+| `.antigravity-plugin/plugin.json` | The Antigravity twin: same name and version |
+| `hooks.json` | Antigravity root hook registration (relative `./hooks/...` commands and Antigravity tool matchers) |
+| `hooks/` | `hooks.json` (read by Claude Code and Codex), the guard scripts and the session temp-dir pruner it registers, and `session-context.md`, the only text injected into every session |
+| `skills/` | One `<name>/SKILL.md` per skill, shared by all three clients (keep `SKILL.md` bodies under 24 KB for Antigravity; put bulk reference docs under `references/`) |
+| `agents/` | Antigravity-native role definitions (`model:` tiers, YAML `tools:` lists) plus Codex (`codex-model`, `codex-effort`, `codex-sandbox`) and Antigravity bridge (`agy-model`) pins |
+| `claude-agents/` | Claude Code role definitions (`model:`, comma `tools:`), bodies kept byte-for-byte identical to `agents/` and pinned by `tests/test_role_pins.py` |
+| `scripts/` | `agy-agent.sh` and `codex-agent.sh`, the opt-in cross-family bridges ai-review Stage 1c fires |
 | `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here |
 | `devkitw`, `devkit.toml` | devkit's wrapper, copied verbatim from the pinned tag and never edited, and its pin |
 
@@ -33,11 +36,13 @@ that can break silently.
   A call a guard _has_ read, that targets what it protects but whose
   effect it cannot model (a patch it cannot simulate, an Edit whose
   `old_string` it cannot locate), is denied: passing it is the bypass.
-- Keep `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json` at the
-  same `name` and `version`, and bump that version past main's in every
-  change that lands in what an installed copy loads: today
-  `.claude-plugin/`, `.codex-plugin/`, `hooks/`, `skills/`, `agents/`
-  and the scripts a skill fires, and any path a client starts loading.
+- Keep `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` and
+  `.antigravity-plugin/plugin.json` at the same `name` and `version`, and
+  bump that version past main's in every change that lands in what an
+  installed copy loads: today `.claude-plugin/`, `.codex-plugin/`,
+  `.antigravity-plugin/`, `hooks.json`, `hooks/`, `skills/`, `agents/`,
+  `claude-agents/` and the scripts a skill fires, and any path a client
+  starts loading.
   Claude Code caches an installed copy of the whole tree under its
   version and updates only when the version moves, so a change shipped
   at an unchanged version never reaches a machine that already has it,
@@ -119,3 +124,7 @@ that can break silently.
   change. Expected warnings: the two missing `author` fields, the root
   `CLAUDE.md` not being plugin context (it is this repository's), and
   the plugin-directory check's `ICON_MISSING`.
+- `agy plugin validate .` — after any manifest, hook, skill or agent
+  change. Must pass with zero errors. Expected multi-tool warnings: root
+  `AGENTS.md` and `hooks/hooks.json` (both are intentionally for other
+  tools; Antigravity reads root `hooks.json` and `skills/`/`agents/`).

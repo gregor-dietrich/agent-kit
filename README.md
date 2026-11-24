@@ -1,11 +1,11 @@
 # agent-kit
 
-A plugin for Claude Code, with a Codex twin, that carries the parts of an
-agent setup which are true about _working with an agent_ rather than
-about any one project: guard hooks with their tests, planning and review
-skills, method rules, and generic agent roles. It is installed once per
-machine, at user scope; everything project-specific stays in each
-project's own `AGENTS.md`.
+A plugin for Claude Code, Codex and Google Antigravity CLI (`agy`) that
+carries the parts of an agent setup which are true about _working with an
+agent_ rather than about any one project: guard hooks with their tests,
+planning and review skills, method rules, and generic agent roles. It is
+installed once per machine, at user scope; everything project-specific
+stays in each project's own `AGENTS.md`.
 
 ## The trap this kit exists to avoid
 
@@ -33,7 +33,7 @@ setup that grows the way the original did.**
 | `hooks/tea_guard.py` | Denies a `tea` single issue/PR read without `--comments` | Gitea/`tea` only; silent everywhere else |
 | `hooks/decisions_status_guard.py` | An agent may draft and amend decisions-log entries but not ratify, de-ratify or delete them | Repositories with a `docs/decisions.md` in the format below; a no-op elsewhere |
 | `hooks/prune_session_tmp.py` | At every session start, in a detached background child, removes Claude Code session temp dirs under `claude-<uid>` untouched for 4 days, never the current or a running session. Tracks Claude Code internals as of 2.1.310 and stops pruning silently if they move | Linux; macOS unverified (#73); inert below Python 3.10 |
-| `hooks/hook_lib.py` | Shared plumbing: payload parse, deny envelope, shell tokenizer, Claude and Codex path resolution | Internal |
+| `hooks/hook_lib.py` | Shared plumbing: payload parse, deny envelope, shell tokenizer, Claude, Codex and Antigravity path resolution | Internal |
 | `hooks/session-context.md` | The four delegation rules that hold on every dispatch, injected at session start | Any repository |
 | `skills/delegation` | Pinned-dispatch policy, per-client pins, the judgment threshold, cost reports | Any repository |
 | `skills/review-triage` | Context gathering, recording, `novel`/`instance` marks, finding destinations | Any repository; release bar comes from the project's decisions log |
@@ -43,8 +43,9 @@ setup that grows the way the original did.**
 | `skills/wrap-up` | End of session: reviews the session for knowledge, skill gaps, friction and automation candidates, reports them as a numbered list with a proposed destination each, and edits or files only the items the operator approves by number | Any repository; destinations come from the project's own docs and rules |
 | `skills/push-gate` | Which gate a push owes, and how it runs | Any repository; narrower gates come from the project's rules |
 | `skills/ai-review` | Multi-agent review with pinned agents, stance-split verification and no finding cap | Any repository; risk paths can be named in the project's `AGENTS.md` |
-| `agents/*` | scout, code-reviewer, software-architect, backend-developer, frontend-developer | Claude Code runs them as agent types, Codex spawns them on their `codex-model` and `codex-effort`; each reads the project's own docs before acting |
-| `scripts/codex-agent.sh` | Pinned Codex dispatch for ai-review Stage 1c | Opt-in per user via the file `~/.config/agent-kit/codex-bridge`; needs codex-cli 0.160.0 or later |
+| `agents/*`, `claude-agents/*` | scout, code-reviewer, software-architect, backend-developer, frontend-developer | Antigravity loads `agents/*` natively (`model:` tiers), Claude Code loads `claude-agents/*` via `.claude-plugin/plugin.json`, Codex spawns `agents/*` on `codex-model` and `codex-effort`; each reads the project's own docs before acting |
+| `scripts/agy-agent.sh` | Pinned read-only Antigravity dispatch for ai-review Stage 1c | Opt-in per user via `~/.config/agent-kit/agy-bridge`; needs `agy` 1.5.16 or later |
+| `scripts/codex-agent.sh` | Pinned Codex dispatch for ai-review Stage 1c | Opt-in per user via `~/.config/agent-kit/codex-bridge`; needs codex-cli 0.160.0 or later |
 
 ### The one that matters most
 
@@ -92,8 +93,27 @@ after installing, and again after any update that changes a hook command —
 an untrusted hook is indistinguishable, from inside a session, from no
 guard at all. Codex plugins carry no agent types; a Codex session
 dispatches the five roles by spawning subagents (the delegation skill,
-"Pins by client"). That is separate from the opt-in bridge below, which
-reaches Codex from a Claude Code session.
+"Pins by client"). That is separate from the opt-in bridges below, which
+provide cross-family reviews in Stage 1c.
+
+Antigravity CLI (`agy`) loads `.antigravity-plugin/plugin.json`, root
+`hooks.json`, `skills/` and `agents/` natively. Install from a clean
+export (a development checkout carries a `.devkit` symlink outside the
+tree, which `agy plugin install` refuses to copy):
+
+```sh
+tmp=$(mktemp -d)
+git archive HEAD | tar -x -C "$tmp"
+agy plugin install "$tmp"
+rm -rf "$tmp"
+```
+
+Under Antigravity's **Orchestrator** mode, the conversation already pairs
+a planner model with a faster executor model inside one turn. The bundled
+Antigravity roles complement that: `code-reviewer` and
+`software-architect` pin `model: inherit` (staying on your active
+Orchestrator/planner session) and omit shell and write tools, while
+`scout`, `backend-developer` and `frontend-developer` pin `model: flash`.
 
 The hooks run under the first `python3` on `PATH` and need 3.10 or newer.
 Under an older one — the Command Line Tools `python3` on macOS is 3.9 —
@@ -102,28 +122,41 @@ floor, rather than crashing and so letting everything through. The pruner,
 a SessionStart hook with no call to refuse, exits quietly and prunes
 nothing, so under that `python3` it is inert.
 
-### Codex bridge (opt-in)
+### Cross-family review bridges (opt-in)
 
-`/agent-kit:ai-review` Stage 1c can send a review to `code-reviewer`
-running on Codex through `scripts/codex-agent.sh`, which pins model,
-reasoning effort and sandbox from the `codex-*` keys in
-`agents/code-reviewer.md` and verifies them against the session banner.
-It sends the review prompt (the diff, the PR and issue threads, the
-context digest) to a second vendor, plus any file codex chooses to read,
-and the preamble itself points it at files outside the project. So it
-runs only once you opt in, with one file that covers every project:
+`/agent-kit:ai-review` Stage 1c can send a second-opinion review to
+`code-reviewer` on another vendor through two opt-in wrappers, each
+verifying the pinned model actually ran and reading its pin from
+`agents/code-reviewer.md`:
 
-```sh
-mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit"
-touch "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit/codex-bridge"
-```
+- **Antigravity bridge (`scripts/agy-agent.sh`)** — cross-family from
+  Claude Code or Codex. Pins `agy-model` from `agents/code-reviewer.md`,
+  locks permissions read-only (no writes, shell, network or MCP) via
+  `--settings`, and verifies the model and token usage from `agy`'s
+  `stream-json` `init` and `result` events. Needs `agy` 1.5.16 or later
+  and `python3`. Opt in with:
 
-The file lives outside every checkout, so no branch can opt you in. A
-project that names its own bridge keeps it, unless the checkout changes
-that bridge. The bridge needs codex-cli 0.160.0 or later and passes
-`--ignore-user-config`: your `$CODEX_HOME/config.toml` is not loaded, so
-a custom provider or proxy setup cannot be used with it, while auth still
-comes from `CODEX_HOME`.
+  ```sh
+  mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit"
+  touch "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit/agy-bridge"
+  ```
+
+- **Codex bridge (`scripts/codex-agent.sh`)** — cross-family from Claude
+  Code or Antigravity. Pins `codex-model`, `codex-effort` and
+  `codex-sandbox` from `agents/code-reviewer.md` and verifies them against
+  the session banner. Needs codex-cli 0.160.0 or later and passes
+  `--ignore-user-config` (auth still comes from `CODEX_HOME`). Opt in
+  with:
+
+  ```sh
+  mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit"
+  touch "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit/codex-bridge"
+  ```
+
+When both opt-in files exist in a Claude Code session, Stage 1c prefers
+`agy-bridge`. Each marker file lives outside every checkout, so no branch
+can opt you in. A project that names its own bridge keeps it, unless the
+checkout changes that bridge.
 
 ## Warning: a broken hook is a silent hook
 
@@ -137,11 +170,12 @@ session. Change a hook only with its tests.
 
 ## Known limits
 
-- The decisions guard vets the edit tools only (Write, Edit, apply_patch),
-  reading markers as they render. Shell commands that write the log are
-  not vetted, by design: a Bash arm was removed because the ways a shell
-  can write a file are open-ended and chasing them was not worth it. Code
-  review catches undesired status changes.
+- The decisions guard vets the edit tools only (Claude Write/Edit, Codex
+  `apply_patch`, and Antigravity file edit tools), reading markers as they
+  render. Shell commands that write the log are not vetted, by design: a
+  Bash arm was removed because the ways a shell can write a file are
+  open-ended and chasing them was not worth it. Code review catches
+  undesired status changes.
 - Hooks read no project configuration and detect no project kind yet;
   that lands with the first hook that branches on one.
 

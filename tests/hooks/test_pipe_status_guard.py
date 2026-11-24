@@ -13,10 +13,11 @@ are therefore symmetric: the traps are denied, and ordinary browsing is not
 off.
 """
 
+import json
 from pathlib import Path
 
 import pytest
-from bash_hook import run_bash_hook
+from bash_hook import run_agy_command_hook, run_bash_hook
 
 _ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _ROOT / "hooks" / "pipe-status-guard.sh"
@@ -575,3 +576,11 @@ def test_documented_accepted_risks_pass(command: str) -> None:
     # Seeing these needs a depth count over openers, closers, case patterns
     # and parentheses; the module docstring names them as accepted risks.
     assert not _denied(command)
+
+
+def test_antigravity_run_command_payload_denies_and_allows() -> None:
+    out = run_agy_command_hook(_HOOK, "make test | tail -5", SHELL="/bin/zsh")
+    parsed = json.loads(out)
+    assert parsed["decision"] == "deny"
+    assert "pipestatus" in parsed["reason"]
+    assert run_agy_command_hook(_HOOK, "git log | head -5") == ""

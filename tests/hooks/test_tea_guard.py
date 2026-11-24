@@ -8,10 +8,11 @@ exists because tea's single-entity views silently omit comments, which has
 shipped work against a diagnosis already recorded on its own issue.)
 """
 
+import json
 import subprocess
 from pathlib import Path
 
-from bash_hook import run_bash_hook
+from bash_hook import run_agy_command_hook, run_bash_hook
 
 _ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _ROOT / "hooks" / "tea-guard.sh"
@@ -91,3 +92,11 @@ def test_malformed_payload_fails_open() -> None:
         timeout=30,
     )
     assert result.stdout == ""
+
+
+def test_antigravity_run_command_payload_denies_and_allows() -> None:
+    out = run_agy_command_hook(_HOOK, "tea issues 256")
+    parsed = json.loads(out)
+    assert parsed["decision"] == "deny"
+    assert "--comments" in parsed["reason"]
+    assert run_agy_command_hook(_HOOK, "tea issues 256 --comments") == ""

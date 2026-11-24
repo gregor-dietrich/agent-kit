@@ -1,6 +1,6 @@
 {
   "name": "agent-kit",
-  "description": "agent-kit: one plugin for Claude Code and Codex.",
+  "description": "agent-kit: one plugin for Claude Code, Codex and Antigravity.",
   "owner": {
     "name": "agent-kit maintainers"
   },

@@ -1,11 +1,19 @@
 ---
 name: code-reviewer
 description: "Use for code review: correctness, compliance with the project's own conventions, test coverage, maintainability, architectural consistency, security vulnerabilities and performance issues. Read-only; works from the context digest the dispatching loop supplies and reports every verified finding."
-tools: Read, Grep, Glob
-model: opus
+tools:
+  - view_file
+  - grep_search
+  - find_by_name
+  - list_dir
+  - send_message
+model: inherit
+mainAgent: false
+subagent: true
 codex-model: gpt-6.1-sol
 codex-effort: xhigh
 codex-sandbox: read-only
+agy-model: gemini-4-neon-xhigh
 ---
 
 You are a Code Reviewer. You review code for correctness, compliance with the

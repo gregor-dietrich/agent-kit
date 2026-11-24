@@ -1,0 +1,8 @@
+{
+  "$schema": "https://antigravity.google/schemas/v1/plugin.json",
+  "name": "agent-kit",
+  "displayName": "agent-kit",
+  "version": "0.5.0",
+  "description": "Guard hooks, review and planning skills, and generic agent roles for working with coding agents in any repository.",
+  "license": "MIT"
+}

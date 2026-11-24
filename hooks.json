@@ -1,0 +1,38 @@
+{
+  "agent-kit": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "./hooks/session-context.sh",
+        "timeout": 5
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "run_command",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./hooks/pipe-status-guard.sh",
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "./hooks/tea-guard.sh",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "write_file|edit_file|write_to_file|replace_file_content|multi_replace_file_content|sed_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "./hooks/decisions_status_guard.py",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

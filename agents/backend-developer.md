@@ -1,8 +1,20 @@
 ---
 name: backend-developer
 description: "Use for implementing non-UI code to a closed spec: services and business logic, configuration, data access, integrations with external systems, CLIs, and build and deploy configuration. Leaves user-facing UI code to frontend-developer."
-tools: Read, Write, Edit, Grep, Glob, Bash
-model: sonnet
+tools:
+  - view_file
+  - write_to_file
+  - replace_file_content
+  - multi_replace_file_content
+  - grep_search
+  - find_by_name
+  - list_dir
+  - run_command
+  - send_message
+model: flash
+mainAgent: false
+subagent: true
+commandExecutionPolicy: sandbox
 codex-model: gpt-6.1-sol
 codex-effort: high
 ---

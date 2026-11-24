@@ -1,0 +1,80 @@
+{
+  "SessionStart": {
+    "artifactDirectoryPath": "/home/user/.gemini/antigravity-cli/brain/00000000-0000-4000-8000-000000000000",
+    "conversationId": "00000000-0000-4000-8000-000000000000",
+    "cwd": "/repo",
+    "hookEventName": "SessionStart",
+    "lastUserInput": "probe",
+    "modelName": "gemini-4-hydrogen-low",
+    "transcriptPath": "/home/user/.gemini/antigravity-cli/brain/00000000-0000-4000-8000-000000000000/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "/repo"
+    ]
+  },
+  "PreToolUse:run_command": {
+    "artifactDirectoryPath": "/home/user/.gemini/antigravity-cli/brain/00000000-0000-4000-8000-000000000000",
+    "conversationId": "00000000-0000-4000-8000-000000000000",
+    "cwd": "/repo",
+    "hookEventName": "PreToolUse",
+    "lastUserInput": "probe",
+    "modelName": "gemini-4-hydrogen-low",
+    "stepIdx": 4,
+    "toolCall": {
+      "args": {
+        "CommandLine": "echo hi | cat",
+        "WaitMsBeforeAsync": 5000,
+        "toolSummary": "Echo piped to cat"
+      },
+      "id": "call_0001",
+      "name": "run_command"
+    },
+    "transcriptPath": "/home/user/.gemini/antigravity-cli/brain/00000000-0000-4000-8000-000000000000/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "/repo"
+    ]
+  },
+  "PreToolUse:write_file": {
+    "artifactDirectoryPath": "/home/user/.gemini/antigravity-cli/brain/00000000-0000-4000-8000-000000000000",
+    "conversationId": "00000000-0000-4000-8000-000000000000",
+    "cwd": "/repo",
+    "hookEventName": "PreToolUse",
+    "lastUserInput": "probe",
+    "modelName": "gemini-4-hydrogen-low",
+    "stepIdx": 2,
+    "toolCall": {
+      "args": {
+        "Content": "alpha\nbeta\ngamma\n",
+        "Overwrite": true,
+        "Path": "/repo/notes.md"
+      },
+      "id": "call_0002",
+      "name": "write_file"
+    },
+    "transcriptPath": "/home/user/.gemini/antigravity-cli/brain/00000000-0000-4000-8000-000000000000/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "/repo"
+    ]
+  },
+  "PreToolUse:edit_file": {
+    "artifactDirectoryPath": "/home/user/.gemini/antigravity-cli/brain/00000000-0000-4000-8000-000000000000",
+    "conversationId": "00000000-0000-4000-8000-000000000000",
+    "cwd": "/repo",
+    "hookEventName": "PreToolUse",
+    "lastUserInput": "probe",
+    "modelName": "gemini-4-hydrogen-low",
+    "stepIdx": 3,
+    "toolCall": {
+      "args": {
+        "Path": "/repo/notes.md",
+        "Replacement": "ALPHA",
+        "Target": "alpha"
+      },
+      "id": "call_0003",
+      "name": "edit_file"
+    },
+    "transcriptPath": "/home/user/.gemini/antigravity-cli/brain/00000000-0000-4000-8000-000000000000/.system_generated/logs/transcript_full.jsonl",
+    "workspacePaths": [
+      "/repo"
+    ]
+  }
+}

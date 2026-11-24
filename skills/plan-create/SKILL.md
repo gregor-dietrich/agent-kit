@@ -42,10 +42,11 @@ through unpinned vehicles.
   `agent-kit:delegation` skill, "The policy", carries the reasoning **and
   the override rule** for a harness workflow that leaves no other choice.
 - `agent-kit:scout` is read-only by instruction, not by harness — it has
-  Bash for read-only `git` and tracker reads. Scope its dispatches
-  accordingly. In Claude Code `agent-kit:software-architect` has no Bash
-  and is read-only at the harness level; it cannot fetch, so give it what
-  it needs. Codex has no such guarantee: it is read-only by instruction.
+  a shell for read-only `git` and tracker reads. Scope its dispatches
+  accordingly. In Claude Code and Antigravity `agent-kit:software-architect`
+  has no shell and is read-only at the harness level; it cannot fetch, so
+  give it what it needs. Codex has no such guarantee: it is read-only by
+  instruction.
 - The steering loop orchestrates: it dispatches, reads back every return,
   puts the decision to the operator, and writes the plan. It MUST NOT do
   the exploration or the design work itself when a dispatch is warranted.

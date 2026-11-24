@@ -1,4 +1,4 @@
-"""The two plugin manifests describe one plugin."""
+"""The plugin manifests describe one plugin across all three clients."""
 
 import json
 from pathlib import Path
@@ -11,11 +11,13 @@ def _load(relative: str) -> dict[str, Any]:
     return json.loads((_ROOT / relative).read_text(encoding="utf-8"))
 
 
-def test_claude_and_codex_manifests_agree() -> None:
+def test_all_three_manifests_agree() -> None:
     claude = _load(".claude-plugin/plugin.json")
     codex = _load(".codex-plugin/plugin.json")
+    agy = _load(".antigravity-plugin/plugin.json")
     for key in ("name", "version", "license"):
         assert codex[key] == claude[key], key
+        assert agy[key] == claude[key], key
 
 
 def test_marketplace_lists_the_plugin_at_the_repo_root() -> None:
@@ -31,3 +33,18 @@ def test_codex_manifest_paths_stay_inside_the_plugin() -> None:
     codex = _load(".codex-plugin/plugin.json")
     for key in ("skills", "hooks"):
         assert codex[key].startswith("./") and ".." not in codex[key], key
+
+
+def test_claude_manifest_lists_every_claude_agent() -> None:
+    claude = _load(".claude-plugin/plugin.json")
+    listed = claude["agents"]
+    assert isinstance(listed, list) and listed
+    for rel in listed:
+        assert rel.startswith("./claude-agents/") and rel.endswith(".md"), rel
+        assert ".." not in rel, rel
+        assert (_ROOT / rel).is_file(), rel
+    on_disk = {
+        f"./claude-agents/{p.name}"
+        for p in (_ROOT / "claude-agents").glob("*.md")
+    }
+    assert set(listed) == on_disk

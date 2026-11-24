@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse guard (Write|Edit|apply_patch): Status is the author's.
+"""PreToolUse guard (edit tools): Status is the author's.
 
 A decisions log (docs/decisions.md) marks each ``## ADR-NNNN`` entry
 **Status:** Accepted | Proposed | retired. Accepted carries real force: a
@@ -42,16 +42,16 @@ A no-op in a repository that keeps no decisions log: an edit is vetted only
 when the file it targets already exists. The guarded path is matched
 lexically and after resolving symlinks.
 
-Scope, honestly: this constrains the Claude Code and Codex edit tools only,
-in whatever checkout they target (the path test is a suffix match, so
-worktrees and secondary checkouts are covered). A shell command that writes
-the file is deliberately not vetted. A Bash arm that tried was removed on
-purpose: the ways a shell can write a file are open-ended, every review
-round found more, and the cost was out of proportion to what it protects.
-Undesired status changes are caught in code review. Do not reintroduce
-it. The guard catches an agent ratifying its own draft in the ordinary
-course of editing, not one set on getting around it.
-``git log -p docs/decisions.md`` remains the audit trail.
+Scope, honestly: this constrains the Claude Code, Codex and Antigravity
+edit tools only, in whatever checkout they target (the path test is a
+suffix match, so worktrees and secondary checkouts are covered). A shell
+command that writes the file is deliberately not vetted. A Bash arm that
+tried was removed on purpose: the ways a shell can write a file are
+open-ended, every review round found more, and the cost was out of
+proportion to what it protects. Undesired status changes are caught in
+code review. Do not reintroduce it. The guard catches an agent ratifying
+its own draft in the ordinary course of editing, not one set on getting
+around it. ``git log -p docs/decisions.md`` remains the audit trail.
 Deliberately NOT paired with a pre-commit ban on committing a Proposed entry
 — committing a draft is legitimate, and blocking it would pressure a
 premature flip to Accepted, manufacturing the rubber-stamp the rule exists
@@ -62,7 +62,8 @@ PreToolUse hook fails OPEN in the harness (only exit 2 or a deny payload
 blocks), so those tests are what notices a broken guard.
 
 Receives tool invocation JSON on stdin. Claude Edit/Write uses
-``tool_input.file_path`` and Codex apply_patch uses ``tool_input.command``;
+``tool_input.file_path``, Codex apply_patch uses ``tool_input.command``,
+and Antigravity file tools use ``toolCall.args.Path`` or ``TargetFile``;
 the wire-format plumbing is shared across hooks via hook_lib.py.
 """
 
@@ -86,6 +87,7 @@ from hook_lib import (
     is_guarded_suffix,
     read_payload,
     tool_input,
+    tool_name,
 )
 
 PROPOSED = "**Status:** Proposed"
@@ -400,9 +402,118 @@ def _existing_logs(payload: dict[str, Any]) -> list[Path]:
     ]
 
 
+_ANTIGRAVITY_TOOLS = {
+    "write_file",
+    "write_to_file",
+    "edit_file",
+    "replace_file_content",
+    "multi_replace_file_content",
+    "sed_file",
+}
+
+
+def _line_range(chunk: dict[str, Any]) -> tuple[int, int] | None:
+    """Return a valid 1-based inclusive (start, end) range, or None."""
+    start, end = chunk.get("StartLine"), chunk.get("EndLine")
+    if (
+        isinstance(start, int)
+        and isinstance(end, int)
+        and not isinstance(start, bool)
+        and not isinstance(end, bool)
+        and 1 <= start <= end
+    ):
+        return start, end
+    return None
+
+
+def _apply_chunk(before: str, chunk: dict[str, Any]) -> str | None:
+    """Simulate one Antigravity replace_file_content chunk."""
+    target = chunk.get("TargetContent")
+    replacement = chunk.get("ReplacementContent")
+    if not isinstance(target, str) or not isinstance(replacement, str):
+        return None
+    if not target:
+        return None
+    has_bounds = "StartLine" in chunk or "EndLine" in chunk
+    if has_bounds:
+        bounds = _line_range(chunk)
+        if bounds is None:
+            return None
+        lines = before.splitlines(keepends=True)
+        start, end = bounds
+        if end > len(lines):
+            return None
+        prefix = "".join(lines[: start - 1])
+        window = "".join(lines[start - 1 : end])
+        suffix = "".join(lines[end:])
+    else:
+        prefix, window, suffix = "", before, ""
+    hits = window.count(target)
+    if hits == 0 or (hits > 1 and not chunk.get("AllowMultiple")):
+        return None
+    return prefix + window.replace(target, replacement) + suffix
+
+
+def _apply_multi_chunks(before: str, raw_chunks: Any) -> str | None:
+    """Simulate Antigravity multi_replace_file_content chunks."""
+    if (
+        not isinstance(raw_chunks, list)
+        or not raw_chunks
+        or not all(isinstance(c, dict) for c in raw_chunks)
+    ):
+        return None
+    chunks: list[dict[str, Any]] = raw_chunks
+    bounded = ["StartLine" in c or "EndLine" in c for c in chunks]
+    if any(bounded) and not all(bounded):
+        return None
+    if all(bounded):
+        ranges = [_line_range(c) for c in chunks]
+        if any(r is None for r in ranges):
+            return None
+        ordered = sorted(
+            zip(ranges, chunks),
+            key=lambda item: item[0],  # type: ignore[arg-type,return-value]
+        )
+        for (_, prev_end), (next_start, _) in zip(
+            (r for r, _ in ordered), (r for r, _ in ordered[1:])
+        ):  # type: ignore[misc]
+            if next_start <= prev_end:
+                return None
+        chunks = [c for _, c in reversed(ordered)]
+    after = before
+    for chunk in chunks:
+        updated = _apply_chunk(after, chunk)
+        if updated is None:
+            return None
+        after = updated
+    return after
+
+
+def _antigravity_after(
+    tool: str, ti: dict[str, Any], before: str
+) -> str | None:
+    """Simulated text of docs/decisions.md after an Antigravity edit tool."""
+    if tool == "write_file":
+        content = str(ti.get("Content", "") or "")
+        return before + content if ti.get("Append") else content
+    if tool == "write_to_file":
+        return str(ti.get("CodeContent", "") or "")
+    if tool == "edit_file":
+        target = str(ti.get("Target", "") or "")
+        replacement = str(ti.get("Replacement", "") or "")
+        if not target or target not in before:
+            return None
+        return before.replace(target, replacement)
+    if tool == "replace_file_content":
+        return _apply_chunk(before, ti)
+    if tool == "multi_replace_file_content":
+        return _apply_multi_chunks(before, ti.get("ReplacementChunks"))
+    return None
+
+
 def main() -> None:
     data = read_payload()
-    tool = str(data.get("tool_name", "") or "")
+    tool = tool_name(data)
     ti = tool_input(data)
 
     if tool == "apply_patch":
@@ -427,6 +538,23 @@ def main() -> None:
                     "the status-marker transitions can be vetted."
                 )
             _vet(before, after)
+        sys.exit(0)
+
+    if tool in _ANTIGRAVITY_TOOLS:
+        edited = _existing_logs(data)
+        if not edited:
+            sys.exit(0)
+        before = _read(edited[0])
+        after = _antigravity_after(tool, ti, before)
+        if after is None:
+            deny(
+                f"Refused: {tool} targets docs/decisions.md but the ADR "
+                "status guard cannot safely model what it would change. "
+                "Re-read the file and use edit_file or replace_file_content "
+                "with an exact target so status-marker transitions can be "
+                "vetted."
+            )
+        _vet(before, after)
         sys.exit(0)
 
     if tool not in ("Edit", "Write"):

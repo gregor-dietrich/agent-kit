@@ -1,12 +1,13 @@
-"""Shared plumbing for the Claude Code and Codex hooks in this directory.
+"""Shared plumbing for the Claude Code, Codex and Antigravity hooks.
 
 One definition of the hook wire format instead of a hand-maintained copy per
 hook: the stdin payload parse — which fails OPEN, because an absent or
 malformed hook payload must never block a tool call — the PreToolUse deny
-envelope, the path resolution for Claude edits and Codex patches, and the
-shell tokenizer every Bash guard reads commands with. Import as a sibling
-module (``import hook_lib``; hooks run by path, so this directory is already
-on ``sys.path``).
+envelope (Claude/Codex snake_case vs Antigravity camelCase), the path
+resolution for Claude edits, Codex patches and Antigravity file tools, and
+the shell tokenizer every Bash guard reads commands with. Import as a
+sibling module (``import hook_lib``; hooks run by path, so this directory is
+already on ``sys.path``).
 """
 
 from __future__ import annotations
@@ -215,30 +216,53 @@ def effective_tool(name: str, args: list[str]) -> tuple[str, list[str]]:
         return name, args
 
 
+_ANTIGRAVITY_FILE_TOOLS = {
+    "write_file",
+    "edit_file",
+    "write_to_file",
+    "replace_file_content",
+    "multi_replace_file_content",
+    "sed_file",
+}
+_ANTIGRAVITY_MODE = False
+
+
+def is_antigravity_payload(payload: dict[str, Any]) -> bool:
+    """Whether *payload* uses Antigravity's camelCase hook wire format."""
+    return (
+        isinstance(payload.get("toolCall"), dict)
+        or "hookEventName" in payload
+        or "conversationId" in payload
+    )
+
+
 def read_payload() -> dict[str, Any]:
     """The hook payload from stdin; exits 0 when there is none."""
+    global _ANTIGRAVITY_MODE
     try:
         data: Any = json.load(sys.stdin)
     except (json.JSONDecodeError, OSError, AttributeError):
         sys.exit(0)  # empty/malformed/unexpected input — never block
     if not isinstance(data, dict):
         sys.exit(0)
-    return cast("dict[str, Any]", data)
+    parsed = cast("dict[str, Any]", data)
+    _ANTIGRAVITY_MODE = is_antigravity_payload(parsed)
+    return parsed
 
 
 def deny(reason: str) -> NoReturn:
     """Emit the PreToolUse deny envelope and end the hook."""
-    print(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": reason,
-                }
+    if _ANTIGRAVITY_MODE:
+        envelope: dict[str, Any] = {"decision": "deny", "reason": reason}
+    else:
+        envelope = {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
             }
-        )
-    )
+        }
+    print(json.dumps(envelope))
     sys.exit(0)
 
 
@@ -253,7 +277,11 @@ def deny(reason: str) -> NoReturn:
 # has no tool call to refuse.
 FLOOR = (3, 10)
 if sys.version_info < FLOOR:
-    if read_payload().get("hook_event_name") == "SessionStart":
+    _floor_payload = read_payload()
+    if (
+        _floor_payload.get("hook_event_name") == "SessionStart"
+        or _floor_payload.get("hookEventName") == "SessionStart"
+    ):
         sys.exit(0)
     deny(
         f"agent-kit's hooks need Python {FLOOR[0]}.{FLOOR[1]} or newer, but "
@@ -263,8 +291,20 @@ if sys.version_info < FLOOR:
     )
 
 
+def tool_name(payload: dict[str, Any]) -> str:
+    """The tool name carried by a Claude/Codex or Antigravity payload."""
+    tc: Any = payload.get("toolCall")
+    if isinstance(tc, dict):
+        return str(tc.get("name", "") or "")
+    return str(payload.get("tool_name", "") or "")
+
+
 def tool_input(payload: dict[str, Any]) -> dict[str, Any]:
-    """The payload's ``tool_input`` object, or ``{}`` when oddly shaped."""
+    """The tool-arguments object, or ``{}`` when oddly shaped."""
+    tc: Any = payload.get("toolCall")
+    if isinstance(tc, dict):
+        args: Any = tc.get("args")
+        return cast("dict[str, Any]", args) if isinstance(args, dict) else {}
     ti: Any = payload.get("tool_input")
     return cast("dict[str, Any]", ti) if isinstance(ti, dict) else {}
 
@@ -291,13 +331,14 @@ def _wrapper_script(parts: list[str]) -> str | None:
 def command_text(ti: dict[str, Any]) -> str:
     """The shell command a tool payload carries, as one scannable string.
 
-    Claude's Bash tool sends ``tool_input.command`` as a string, and so does
-    Codex's shell tool in the payloads captured so far; an argv list
-    (``["bash", "-lc", "make test | tail -5"]``) is handled too. ``str()``
-    on the list would yield its Python repr, which matches none of the
-    guards' patterns — every Bash guard would go blind on that shape.
+    Claude's Bash tool sends ``tool_input.command`` as a string, Codex's
+    shell tool sends the same or an argv list
+    (``["bash", "-lc", "make test | tail -5"]``), and Antigravity's
+    ``run_command`` sends ``toolCall.args.CommandLine``. ``str()`` on an
+    argv list would yield its Python repr, which matches none of the guards'
+    patterns — every Bash guard would go blind on that shape.
     """
-    raw: Any = ti.get("command")
+    raw: Any = ti.get("command") if "command" in ti else ti.get("CommandLine")
     if isinstance(raw, str):
         return raw
     if not isinstance(raw, list):
@@ -326,11 +367,19 @@ def payload_cwd(payload: dict[str, Any]) -> Path:
     raw: Any = payload.get("cwd")
     if isinstance(raw, str) and raw:
         return Path(raw)
+    workspaces: Any = payload.get("workspacePaths")
+    if (
+        isinstance(workspaces, list)
+        and workspaces
+        and isinstance(workspaces[0], str)
+        and workspaces[0]
+    ):
+        return Path(workspaces[0])
     return Path.cwd()
 
 
 def absolute_path(payload: dict[str, Any], raw: str) -> Path:
-    """Resolve one Claude/Codex path without requiring it to exist."""
+    """Resolve one client tool path without requiring it to exist."""
     path = Path(raw)
     if not path.is_absolute():
         path = payload_cwd(payload) / path
@@ -338,17 +387,24 @@ def absolute_path(payload: dict[str, Any], raw: str) -> Path:
 
 
 def changed_paths(payload: dict[str, Any]) -> list[Path]:
-    """Return every path targeted by a Claude edit or Codex patch.
+    """Return every path targeted by a Claude, Codex or Antigravity edit.
 
     Claude's Edit/Write tools carry one ``tool_input.file_path``. Codex's
     ``apply_patch`` carries its patch language in ``tool_input.command`` and
-    can update multiple files in one invocation. Move destinations count as
-    changed too; duplicate paths retain only their first occurrence.
+    can update multiple files in one invocation. Antigravity's file edit
+    tools carry ``toolCall.args.Path`` or ``toolCall.args.TargetFile``. Move
+    destinations count as changed too; duplicate paths retain only their
+    first occurrence.
     """
     ti = tool_input(payload)
-    tool = str(payload.get("tool_name", "") or "")
+    tool = tool_name(payload)
     if tool in ("Edit", "Write"):
         raw = ti.get("file_path")
+        if isinstance(raw, str) and raw:
+            return [absolute_path(payload, raw)]
+        return []
+    if tool in _ANTIGRAVITY_FILE_TOOLS:
+        raw = ti.get("Path") or ti.get("TargetFile")
         if isinstance(raw, str) and raw:
             return [absolute_path(payload, raw)]
         return []

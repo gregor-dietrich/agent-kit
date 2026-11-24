@@ -814,3 +814,277 @@ def test_an_edit_through_a_symlink_is_vetted(tmp_path: Path) -> None:
     link.symlink_to(doc)
     payload = _edit(link, "**Status:** Proposed", "**Status:** Accepted")
     assert _denied(payload)
+
+
+# --- Antigravity edit tools -------------------------------------------------
+
+
+def _agy_call(
+    name: str, args: dict[str, object], cwd: Path | None = None
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "hookEventName": "PreToolUse",
+        "conversationId": "0000",
+        "toolCall": {"name": name, "args": args},
+    }
+    if cwd is not None:
+        payload["cwd"] = str(cwd)
+    return payload
+
+
+def _agy_denied(payload: dict[str, object], cwd: Path | None = None) -> bool:
+    out = _run(payload, cwd)
+    if not out:
+        return False
+    parsed = json.loads(out)
+    return parsed.get("decision") == "deny" and bool(parsed.get("reason"))
+
+
+def test_antigravity_edit_file_blocks_flip_and_allows_prose(
+    tmp_path: Path,
+) -> None:
+    doc = _decisions_file(tmp_path)
+    assert _agy_denied(
+        _agy_call(
+            "edit_file",
+            {
+                "Path": str(doc),
+                "Target": "**Status:** Proposed",
+                "Replacement": "**Status:** Accepted",
+            },
+        )
+    )
+    assert not _agy_denied(
+        _agy_call(
+            "edit_file",
+            {
+                "Path": str(doc),
+                "Target": "settled one.",
+                "Replacement": "settled one (amended).",
+            },
+        )
+    )
+    assert _agy_denied(
+        _agy_call(
+            "edit_file",
+            {"Path": str(doc), "Target": "missing", "Replacement": "x"},
+        )
+    )
+    assert _agy_denied(
+        _agy_call(
+            "edit_file",
+            {"Path": str(doc), "Target": "", "Replacement": "x"},
+        )
+    )
+
+
+def test_antigravity_write_file_and_write_to_file(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    assert _agy_denied(
+        _agy_call(
+            "write_file",
+            {"Path": str(doc), "Content": _DOC.replace("Proposed", "Accepted")},
+        )
+    )
+    assert not _agy_denied(
+        _agy_call(
+            "write_file",
+            {
+                "Path": str(doc),
+                "Append": True,
+                "Content": "\n## ADR-0003 — draft\n\n**Status:** Proposed\n",
+            },
+        )
+    )
+    assert _agy_denied(
+        _agy_call(
+            "write_file",
+            {
+                "Path": str(doc),
+                "Append": True,
+                "Content": "\n## ADR-0003 — new\n\n**Status:** Accepted\n",
+            },
+        )
+    )
+    assert _agy_denied(
+        _agy_call(
+            "write_to_file",
+            {
+                "TargetFile": str(doc),
+                "CodeContent": _DOC.replace("Accepted", "Proposed"),
+            },
+        )
+    )
+    assert not _agy_denied(
+        _agy_call(
+            "write_file",
+            {
+                "Path": str(tmp_path / "other.md"),
+                "Content": "**Status:** Accepted",
+            },
+        )
+    )
+
+
+def test_antigravity_replace_file_content_and_bounds(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    assert _agy_denied(
+        _agy_call(
+            "replace_file_content",
+            {
+                "TargetFile": str(doc),
+                "StartLine": 1,
+                "EndLine": 4,
+                "TargetContent": "**Status:** Proposed",
+                "ReplacementContent": "**Status:** Accepted",
+            },
+        )
+    )
+    assert not _agy_denied(
+        _agy_call(
+            "replace_file_content",
+            {
+                "TargetFile": str(doc),
+                "StartLine": 5,
+                "EndLine": 11,
+                "TargetContent": "settled one.",
+                "ReplacementContent": "settled one (v2).",
+            },
+        )
+    )
+    # AllowMultiple replaces both occurrences; without it, ambiguity is denied.
+    assert not _agy_denied(
+        _agy_call(
+            "replace_file_content",
+            {
+                "TargetFile": str(doc),
+                "TargetContent": "**Date:** d",
+                "ReplacementContent": "**Date:** 2026-11-24",
+                "AllowMultiple": True,
+            },
+        )
+    )
+    assert _agy_denied(
+        _agy_call(
+            "replace_file_content",
+            {
+                "TargetFile": str(doc),
+                "TargetContent": "**Date:** d",
+                "ReplacementContent": "**Date:** 2026-11-24",
+                "AllowMultiple": False,
+            },
+        )
+    )
+    # Invalid bounds or missing types fail closed (deny).
+    for bad in (
+        {
+            "StartLine": 5,
+            "EndLine": 2,
+            "TargetContent": "x",
+            "ReplacementContent": "y",
+        },
+        {
+            "StartLine": 1,
+            "EndLine": 999,
+            "TargetContent": "x",
+            "ReplacementContent": "y",
+        },
+        {"TargetContent": "", "ReplacementContent": "y"},
+        {"TargetContent": 123, "ReplacementContent": "y"},
+    ):
+        assert _agy_denied(
+            _agy_call("replace_file_content", {"TargetFile": str(doc), **bad})
+        )
+
+
+def test_antigravity_multi_replace_and_sed_file(tmp_path: Path) -> None:
+    doc = _decisions_file(tmp_path)
+    assert not _agy_denied(
+        _agy_call(
+            "multi_replace_file_content",
+            {
+                "TargetFile": str(doc),
+                "ReplacementChunks": [
+                    {
+                        "StartLine": 1,
+                        "EndLine": 5,
+                        "TargetContent": "draft one.",
+                        "ReplacementContent": "draft 1.",
+                    },
+                    {
+                        "StartLine": 6,
+                        "EndLine": 11,
+                        "TargetContent": "settled one.",
+                        "ReplacementContent": "settled 2.",
+                    },
+                ],
+            },
+        )
+    )
+    assert _agy_denied(
+        _agy_call(
+            "multi_replace_file_content",
+            {
+                "TargetFile": str(doc),
+                "ReplacementChunks": [
+                    {
+                        "TargetContent": "draft one.",
+                        "ReplacementContent": "draft 1.",
+                    },
+                    {
+                        "TargetContent": "**Status:** Proposed",
+                        "ReplacementContent": "**Status:** Accepted",
+                    },
+                ],
+            },
+        )
+    )
+    # Malformed, mixed, invalid-range, overlapping, or unmatched chunks deny.
+    for bad_chunks in (
+        [],
+        "not-a-list",
+        [
+            {
+                "StartLine": 1,
+                "EndLine": 3,
+                "TargetContent": "x",
+                "ReplacementContent": "y",
+            },
+            {"TargetContent": "a", "ReplacementContent": "b"},
+        ],
+        [
+            {
+                "StartLine": 0,
+                "EndLine": 2,
+                "TargetContent": "x",
+                "ReplacementContent": "y",
+            },
+        ],
+        [
+            {
+                "StartLine": 1,
+                "EndLine": 5,
+                "TargetContent": "draft one.",
+                "ReplacementContent": "a",
+            },
+            {
+                "StartLine": 5,
+                "EndLine": 11,
+                "TargetContent": "settled one.",
+                "ReplacementContent": "b",
+            },
+        ],
+        [
+            {"TargetContent": "missing", "ReplacementContent": "y"},
+        ],
+    ):
+        assert _agy_denied(
+            _agy_call(
+                "multi_replace_file_content",
+                {"TargetFile": str(doc), "ReplacementChunks": bad_chunks},
+            )
+        )
+    # sed_file cannot be safely simulated and is denied on docs/decisions.md.
+    assert _agy_denied(
+        _agy_call("sed_file", {"TargetFile": str(doc), "Expression": "s/a/b/"})
+    )

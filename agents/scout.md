@@ -1,8 +1,17 @@
 ---
 name: scout
 description: "Use for read-only exploration and context-gathering: sweeping the codebase, docs, git history and tracker state to answer 'what exists, where, and how does it fit together' before planning, review or implementation. Returns conclusions with file:line references, never file dumps."
-tools: Read, Grep, Glob, Bash
-model: sonnet
+tools:
+  - view_file
+  - grep_search
+  - find_by_name
+  - list_dir
+  - run_command
+  - send_message
+model: flash
+mainAgent: false
+subagent: true
+commandExecutionPolicy: sandbox
 codex-model: gpt-6.1-sol
 codex-effort: high
 ---

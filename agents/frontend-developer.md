@@ -1,8 +1,20 @@
 ---
 name: frontend-developer
 description: "Use for implementing user-facing UI code to a closed spec: pages, views, components, layout, client-side state and user-facing features. Leaves services, config, data access, integrations, CLIs and build/deploy to backend-developer."
-tools: Read, Write, Edit, Grep, Glob, Bash
-model: sonnet
+tools:
+  - view_file
+  - write_to_file
+  - replace_file_content
+  - multi_replace_file_content
+  - grep_search
+  - find_by_name
+  - list_dir
+  - run_command
+  - send_message
+model: flash
+mainAgent: false
+subagent: true
+commandExecutionPolicy: sandbox
 codex-model: gpt-6.1-sol
 codex-effort: high
 ---

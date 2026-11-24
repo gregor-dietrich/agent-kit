@@ -15,11 +15,20 @@ from hook_lib import (
     changed_paths,
     command_text,
     effective_tool,
+    is_antigravity_payload,
+    payload_cwd,
     simple_commands,
+    tool_input,
+    tool_name,
 )
 
 _PAYLOADS: dict[str, Any] = json.loads(
     (Path(__file__).parent / "fixtures" / "codex_hook_payloads.json").read_text(
+        encoding="utf-8"
+    )
+)
+_AGY_PAYLOADS: dict[str, Any] = json.loads(
+    (Path(__file__).parent / "fixtures" / "agy_hook_payloads.json").read_text(
         encoding="utf-8"
     )
 )
@@ -191,3 +200,42 @@ def test_captured_patch_payload_resolves_against_its_own_cwd() -> None:
     payload = _PAYLOADS["PreToolUse:apply_patch"]
     assert payload["cwd"] == "/repo"
     assert changed_paths(payload) == [Path("/repo/probe_tmp.txt")]
+
+
+# --- captured Antigravity payloads (agy 1.5.16) -----------------------------
+
+
+def test_captured_antigravity_payloads_parse_through_shared_helpers() -> None:
+    run_cmd = _AGY_PAYLOADS["PreToolUse:run_command"]
+    assert is_antigravity_payload(run_cmd)
+    assert not is_antigravity_payload(_PAYLOADS["PreToolUse:Bash"])
+    assert tool_name(run_cmd) == "run_command"
+    assert command_text(tool_input(run_cmd)) == "echo hi | cat"
+
+    write_p = _AGY_PAYLOADS["PreToolUse:write_file"]
+    assert tool_name(write_p) == "write_file"
+    assert changed_paths(write_p) == [Path("/repo/notes.md")]
+
+    edit_p = _AGY_PAYLOADS["PreToolUse:edit_file"]
+    assert tool_name(edit_p) == "edit_file"
+    assert changed_paths(edit_p) == [Path("/repo/notes.md")]
+
+
+def test_antigravity_target_file_and_workspace_cwd_fallback(
+    tmp_path: Path,
+) -> None:
+    payload: dict[str, Any] = {
+        "hookEventName": "PreToolUse",
+        "workspacePaths": [str(tmp_path)],
+        "toolCall": {
+            "name": "replace_file_content",
+            "args": {"TargetFile": "docs/decisions.md"},
+        },
+    }
+    assert payload_cwd(payload) == tmp_path
+    assert changed_paths(payload) == [tmp_path / "docs" / "decisions.md"]
+    empty_args: dict[str, Any] = {
+        "toolCall": {"name": "write_file", "args": "bad"}
+    }
+    assert tool_input(empty_args) == {}
+    assert changed_paths(empty_args) == []
