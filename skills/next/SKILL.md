@@ -82,7 +82,8 @@ named in an issue or comment read later gets the same question.
 
 Then read the ground, as every later stage needs it:
 
-- the project's `AGENTS.md`/`CLAUDE.md`, its decisions log if it keeps
+- the project's `AGENTS.md`/`CLAUDE.md`/`GEMINI.md`, its decisions log if
+  it keeps
   one (an Accepted entry removes an option before it is offered), and its
   rules for landing work and for PRs;
 - the tracker, through the CLI the remote's host calls for (`gh`, `glab`,

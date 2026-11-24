@@ -1,4 +1,4 @@
-"""Registration pins for hooks/hooks.json, read by Claude Code and Codex.
+"""Registration pins for hooks/hooks.json (Claude/Codex) and hooks.json (Agy).
 
 A hook that is registered but cannot start fails open exactly like one
 that crashes, so the wiring is pinned as carefully as the guards.
@@ -326,13 +326,30 @@ def test_the_import_check_names_what_is_not_stdlib_or_a_sibling(
     assert result.stdout.splitlines() == ["b.py:5: tomli", "b.py:6: tomllib"]
 
 
-def test_session_context_is_injected_verbatim(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "stdin_payload",
+    [
+        pytest.param("{}", id="empty-object"),
+        pytest.param(
+            json.dumps(
+                {
+                    "hook_event_name": "SessionStart",
+                    "cwd": '/tmp/"conversationId',
+                }
+            ),
+            id="claude-cwd-with-substring",
+        ),
+    ],
+)
+def test_session_context_is_injected_verbatim(
+    tmp_path: Path, stdin_payload: str
+) -> None:
     command = _registered("session-context.sh")
     result = subprocess.run(
         ["sh", "-c", command],
         cwd=tmp_path,
         env={**os.environ, "CLAUDE_PLUGIN_ROOT": str(_ROOT)},
-        input="{}",
+        input=stdin_payload,
         capture_output=True,
         text=True,
         check=False,
@@ -433,9 +450,15 @@ _AGY_HOOKS: dict[str, Any] = json.loads(
     (_ROOT / "hooks.json").read_text(encoding="utf-8")
 )["agent-kit"]
 _AGY_COMMAND = re.compile(r"^\./hooks/([\w.-]+)$")
+_AGY_PAYLOADS: dict[str, Any] = json.loads(
+    (
+        _ROOT / "tests" / "hooks" / "fixtures" / "agy_hook_payloads.json"
+    ).read_text(encoding="utf-8")
+)
 
 
 def _agy_registrations() -> list[tuple[str, str, str]]:
+    assert set(_AGY_HOOKS) <= {"SessionStart", "PreToolUse"}
     out: list[tuple[str, str, str]] = []
     for handler in _AGY_HOOKS.get("SessionStart", []):
         out.append(("SessionStart", "", handler["command"]))
@@ -482,6 +505,12 @@ def test_antigravity_guards_are_wired_to_the_tools_they_guard() -> None:
             "decisions_status_guard.py",
         ),
     }
+    [dsg_matcher] = [
+        matcher
+        for _, matcher, name in wired
+        if name == "decisions_status_guard.py"
+    ]
+    assert set(dsg_matcher.split("|")) == hook_lib.ANTIGRAVITY_FILE_TOOLS
 
 
 def _agy_probe(script: str, root: Path) -> dict[str, Any]:
@@ -537,7 +566,7 @@ def test_antigravity_registered_command_denies_end_to_end(
     _run_agy_guard(command, tmp_path)
 
 
-@pytest.mark.parametrize("version", ["3.9", "3.10"])
+@pytest.mark.parametrize("version", ["3.8", "3.9", "3.10"])
 @pytest.mark.parametrize(("event", "matcher", "command"), _AGY_GUARDS)
 def test_antigravity_registered_command_holds_the_python_floor(
     event: str,
@@ -562,9 +591,7 @@ def test_antigravity_session_context_emits_inject_steps() -> None:
     result = subprocess.run(
         ["sh", "-c", command],
         cwd=_ROOT,
-        input=json.dumps(
-            {"hookEventName": "SessionStart", "conversationId": "0000"}
-        ),
+        input=json.dumps(_AGY_PAYLOADS["SessionStart"]),
         capture_output=True,
         text=True,
         check=False,
@@ -582,10 +609,13 @@ def test_antigravity_session_context_emits_inject_steps() -> None:
 
 def test_antigravity_session_start_below_floor_exits_quietly(
     python3_dir: Callable[[str], Path],
+    tmp_path: Path,
 ) -> None:
     env = {
         **os.environ,
         "PATH": f"{python3_dir('3.9')}{os.pathsep}{os.environ['PATH']}",
+        "CLAUDE_CODE_TMPDIR": str(tmp_path),
+        "CLAUDE_CONFIG_DIR": str(tmp_path / "config"),
     }
     result = subprocess.run(
         [str(_ROOT / "hooks" / "prune_session_tmp.py")],

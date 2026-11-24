@@ -134,7 +134,9 @@ what it did. That return is the most useful thing a subagent produces and
 it is lost unless the prompt asks for it.
 
 Name the session's scratch directory in each dispatch (Claude Code's
-session scratchpad; under a client with none, say so) as the place for
+session scratchpad, or Antigravity's per-conversation scratch directory
+`<appDataDir>/brain/<conversation-id>/scratch/`; under a client with none,
+say so) as the place for
 the agent's scratch files and gate logs. A bare `mktemp` lands in `/tmp`,
 outside anything that cleans up after the session, and stays there.
 

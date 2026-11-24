@@ -7,21 +7,31 @@
 # `agy` headless runs default to whatever model the user selected last, and a
 # hand-built call does not prove the requested model ran or lock permissions
 # read-only. So this wrapper reads `agy-model` from `agents/<role>.md` (never
-# a copy kept here), passes an inline `--settings` JSON object that allows
+# a copy kept here), passes `--sandbox`, `--disable-slash-commands`,
+# `--print-timeout`, and an inline `--settings` JSON object that allows
 # `read_file(*)` and denies writes, shell commands, MCP tools and URL fetches,
 # streams the prompt via `--input-format stream-json` (avoiding ARG_MAX on
 # large diffs), and VERIFIES the `stream-json` `init` and `result` events.
 #
-# The `init` event's `model` must equal the pin and its `permission_mode` must
-# not be `always-proceed`; the `result` event must report `status: "SUCCESS"`
-# and a non-empty `response`. A run whose stream lacks either event, or whose
-# `init.model` disagrees, exits 3 rather than handing back an answer nobody
-# can attribute to the pinned model.
+# Verification requires exactly one `init` and one `result` event: `init.model`
+# must equal the pin, `init.permission_mode` must equal `request-review`,
+# `init.tools` must be a non-empty list drawn strictly from read-only tools
+# (`find_by_name`, `grep_search`, `list_dir`, `view_file`, `read_file`), and
+# `result` must report `status: "SUCCESS"` and a non-empty `response`. A run
+# violating any check exits 3 rather than handing back an unverified answer.
+#
+# Before dispatching, this wrapper scans the target repository for repo-local
+# executable Antigravity configs under `.agents`, `.agent`, `_agents`, `_agent`
+# (`hooks.json`, `mcp_config.json`, `plugins.json`, `plugins/`) and refuses
+# (exit 2) unless `AGY_AGENT_ALLOW_REPO_CONFIG=1` is set after reviewing them.
+# Residual limitation: `agy 1.5.16` has no `--ignore-user-config` flag, so
+# user-level Antigravity settings remain active.
 #
 # The user opts in, with one file that covers every project, by creating
-# ${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit/agy-bridge; its content is not
-# read. Without it, `agy` is never called: the file is the user's consent to
-# send the review prompt, and whatever `agy` chooses to read, to a second
+# ${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit/agy-bridge (a relative
+# XDG_CONFIG_HOME is ignored per the XDG Base Directory Spec); its content is
+# not read. Without it, `agy` is never called: the file is the user's consent
+# to send the review prompt, and whatever `agy` chooses to read, to a second
 # vendor. It lives outside every checkout, so no branch can grant it.
 #
 # The stream-json `init`, `result` and `usage` shapes parsed below were
@@ -41,17 +51,22 @@
 #
 # Exit status:
 #   0    the run finished, `init` verified the pin, `agy` answered
-#   2    usage error, failed precondition, user not opted in, or a pin
-#        key missing or malformed in the role file; `agy` did not run
-#   3    the pin could not be verified (`init` absent or mismatched),
-#        permissions were bypassed, or `agy` returned no answer: discard
+#   2    usage error, failed precondition, user not opted in, repo-local
+#        configs refused, or a pin key missing/malformed; `agy` did not run
+#   3    the pin could not be verified (`init` absent, duplicated or
+#        mismatched), permissions or tools were unexpected, or `agy` returned
+#        no valid answer: discard
 #   124  the wall-clock bound stopped the run; 137 it had to be killed
 #   128+n  this wrapper got signal n (HUP, INT, TERM) and stopped `agy`
 #   else `agy`'s own status, when `agy` itself failed
 #
-# Environment: AGY_AGENT_TIMEOUT bounds one dispatch, in whole seconds
-# (default 7200). Passed to `agy --print-timeout` and, when GNU `timeout`
-# (`gtimeout` on macOS) is on PATH, also enforced externally.
+# Environment:
+#   AGY_AGENT_TIMEOUT           bounds one dispatch in whole seconds (default
+#                               7200), passed to `agy --print-timeout` and,
+#                               when GNU `timeout` (`gtimeout`) is on PATH,
+#                               also enforced externally.
+#   AGY_AGENT_ALLOW_REPO_CONFIG set to 1 to allow repo-local Antigravity
+#                               configs after confirming them.
 #
 # Portable down to bash 3.2 (stock macOS): no mapfile, no case-folding
 # expansions, no associative arrays.
@@ -59,7 +74,12 @@
 set -euo pipefail
 
 USAGE='usage: agy-agent.sh <role> <prompt-file> [<transcript-file>]'
-OPT_IN="${XDG_CONFIG_HOME:-${HOME:-}/.config}/agent-kit/agy-bridge"
+if [[ "${XDG_CONFIG_HOME:-}" == /* ]]; then
+	CONFIG_HOME="$XDG_CONFIG_HOME"
+else
+	CONFIG_HOME="${HOME:-}/.config"
+fi
+OPT_IN="$CONFIG_HOME/agent-kit/agy-bridge"
 MIN_VERSION='1.5.16'
 SETTINGS='{"permissions":{"allow":["read_file(*)"],"deny":["write_file(*)","command(*)","mcp(*)","read_url(*)","execute_url(*)","download_url(*)"]}}'
 
@@ -107,9 +127,30 @@ fi
 ROOT="$(git rev-parse --show-toplevel 2> /dev/null)" ||
 	die 'not inside a git repository; run from the target project.'
 
-[[ -f "$OPT_IN" ]] ||
+if [[ "$CONFIG_HOME" != /* || ! -f "$OPT_IN" ]]; then
 	die "not opted in: $OPT_IN does not exist. Antigravity was not called." \
 		'Create that file to let every project send reviews to Antigravity.'
+fi
+
+if [[ "${AGY_AGENT_ALLOW_REPO_CONFIG:-}" != "1" ]]; then
+	REPO_CONFIGS=()
+	for cfg_dir in .agents .agent _agents _agent; do
+		for cfg_file in hooks.json mcp_config.json plugins.json; do
+			cfg_path="$ROOT/$cfg_dir/$cfg_file"
+			[[ ! -e "$cfg_path" && ! -L "$cfg_path" ]] ||
+				REPO_CONFIGS+=("$cfg_dir/$cfg_file")
+		done
+		cfg_dir_path="$ROOT/$cfg_dir/plugins"
+		[[ ! -d "$cfg_dir_path" && ! -L "$cfg_dir_path" ]] ||
+			REPO_CONFIGS+=("$cfg_dir/plugins/")
+	done
+	if [[ "${#REPO_CONFIGS[@]}" -gt 0 ]]; then
+		die "refusing repo-local Antigravity config(s) in $ROOT:" \
+			"${REPO_CONFIGS[@]}" \
+			'Review from a clean checkout, or set' \
+			'AGY_AGENT_ALLOW_REPO_CONFIG=1 only after confirming them.'
+	fi
+fi
 
 FIRST_LINE=""
 IFS= read -r FIRST_LINE < "$ROLE_FILE" || true
@@ -202,20 +243,22 @@ trap 'stop 15' TERM
 STREAM_FILE="${TRANSCRIPT:-$WORKDIR/stream.jsonl}"
 STDERR_FILE="$WORKDIR/stderr"
 MESSAGE_FILE="$WORKDIR/message"
-# Created now, after every cheap refusal and before anything is spent.
-{ : > "$STREAM_FILE"; } 2> /dev/null ||
-	die "transcript path is not writable: $STREAM_FILE"
-
 INPUT_JSON="$WORKDIR/input.jsonl"
+
 python3 -c '
 import json, sys
 preamble, prompt_path, out_path = sys.argv[1:4]
-with open(prompt_path, encoding="utf-8") as fh:
+with open(prompt_path, encoding="utf-8", errors="replace") as fh:
     body = fh.read()
 event = {"event": "user", "message": {"content": f"{preamble}\n\n{body}"}}
 with open(out_path, "w", encoding="utf-8") as out:
     out.write(json.dumps(event) + "\n")
-' "$PREAMBLE" "$PROMPT_FILE" "$INPUT_JSON"
+' "$PREAMBLE" "$PROMPT_FILE" "$INPUT_JSON" ||
+	die "failed to encode prompt file: $PROMPT_FILE"
+
+# Created now, after every cheap refusal and before anything is spent.
+{ : > "$STREAM_FILE"; } 2> /dev/null ||
+	die "transcript path is not writable: $STREAM_FILE"
 
 printf 'Dispatching %s to Antigravity: model %s,\n' "$ROLE" "$MODEL" >&2
 printf '  sandbox read-only, in %s\n' "$ROOT" >&2
@@ -232,6 +275,7 @@ STATUS=0
 	--input-format stream-json \
 	--output-format stream-json \
 	--model "$MODEL" \
+	--sandbox \
 	--disable-slash-commands \
 	--print-timeout "${TIMEOUT_SECONDS}s" \
 	--settings "$SETTINGS" \
@@ -246,6 +290,10 @@ fail() {
 	[[ $# -eq 0 ]] || printf '  %s\n' "$@" >&2
 	[[ -z "$TRANSCRIPT" ]] ||
 		printf '  agy transcript: %s\n' "$TRANSCRIPT" >&2
+	if [[ -s "${STDERR_FILE:-}" ]]; then
+		printf '  agy stderr:\n' >&2
+		awk 'NR <= 20 { print "    " $0 }' "$STDERR_FILE" >&2
+	fi
 	exit "$status"
 }
 
@@ -255,8 +303,18 @@ python3 -c '
 import json, sys
 
 stream_path, expected_model, msg_path = sys.argv[1:4]
+allowed_tools = {
+    "find_by_name",
+    "grep_search",
+    "list_dir",
+    "view_file",
+    "read_file",
+}
 init_obj = None
+init_count = 0
 result_obj = None
+result_count = 0
+bad_result_status = None
 with open(stream_path, encoding="utf-8", errors="replace") as fh:
     for line in fh:
         line = line.strip()
@@ -269,10 +327,18 @@ with open(stream_path, encoding="utf-8", errors="replace") as fh:
         if not isinstance(obj, dict):
             continue
         ev = obj.get("event")
-        if ev == "init" and init_obj is None and isinstance(obj.get("init"), dict):
-            init_obj = obj["init"]
-        elif ev == "result" and isinstance(obj.get("result"), dict):
-            result_obj = obj["result"]
+        if ev == "init":
+            init_count += 1
+            if init_obj is None and isinstance(obj.get("init"), dict):
+                init_obj = obj["init"]
+        elif ev == "result":
+            result_count += 1
+            res = obj.get("result")
+            if isinstance(res, dict):
+                if result_obj is None:
+                    result_obj = res
+                if res.get("status") != "SUCCESS" and bad_result_status is None:
+                    bad_result_status = res.get("status")
 
 tokens = None
 if isinstance(result_obj, dict):
@@ -287,8 +353,12 @@ if tokens is not None:
 else:
     print("TOKENS=UNAVAILABLE")
 
-if init_obj is None:
+if init_count == 0 or init_obj is None:
     print("ERR=no init event in stream-json output")
+    sys.exit(3)
+
+if init_count != 1:
+    print(f"ERR=unexpected init event count: {init_count}; expected 1")
     sys.exit(3)
 
 observed_model = init_obj.get("model")
@@ -300,12 +370,32 @@ if observed_model != expected_model:
     sys.exit(3)
 
 perm_mode = init_obj.get("permission_mode")
-if perm_mode == "always-proceed":
-    print("ERR=permission_mode is always-proceed; read-only boundary bypassed")
+if perm_mode != "request-review":
+    print(
+        f"ERR=unexpected permission_mode {perm_mode!r}; "
+        "expected '\''request-review'\''"
+    )
     sys.exit(3)
 
-if result_obj is None:
+tools = init_obj.get("tools")
+if (
+    not isinstance(tools, list)
+    or not tools
+    or not all(isinstance(t, str) and t in allowed_tools for t in tools)
+):
+    print(f"ERR=unexpected tools in init event: {tools!r}")
+    sys.exit(3)
+
+if result_count == 0 or result_obj is None:
     print("ERR=no result event in stream-json output")
+    sys.exit(3)
+
+if result_count != 1:
+    print(f"ERR=unexpected result event count: {result_count}; expected 1")
+    sys.exit(3)
+
+if bad_result_status is not None:
+    print(f"ERR=result status is {bad_result_status!r}, not SUCCESS")
     sys.exit(3)
 
 res_status = result_obj.get("status")

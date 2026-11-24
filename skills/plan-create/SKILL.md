@@ -43,10 +43,13 @@ through unpinned vehicles.
   the override rule** for a harness workflow that leaves no other choice.
 - `agent-kit:scout` is read-only by instruction, not by harness — it has
   a shell for read-only `git` and tracker reads. Scope its dispatches
-  accordingly. In Claude Code and Antigravity `agent-kit:software-architect`
-  has no shell and is read-only at the harness level; it cannot fetch, so
-  give it what it needs. Codex has no such guarantee: it is read-only by
-  instruction.
+  accordingly. In Claude Code `agent-kit:software-architect` has no shell
+  and is read-only at the harness level; in Antigravity it omits write
+  tools at the harness level while holding sandboxed `run_command` for
+  read-only file search and listing (read-only by instruction for shell
+  commands, bound by `scout.md`'s Hard constraints and the steering loop's
+  `git status --porcelain --ignored=matching` check); in Codex it is
+  read-only by instruction. Give it what it needs so it never fetches.
 - The steering loop orchestrates: it dispatches, reads back every return,
   puts the decision to the operator, and writes the plan. It MUST NOT do
   the exploration or the design work itself when a dispatch is warranted.
@@ -82,7 +85,8 @@ Gather in the main loop what Stage 1 and 2 prompts must carry:
 - the project's decisions log, if it keeps one (`docs/decisions.md`) —
   **always**, read as the `agent-kit:design-exploration` skill's "Before
   proposing anything" says, since it changes what is even proposable;
-- the project's `AGENTS.md` (or `CLAUDE.md`), any nested one for the area
+- the project's `AGENTS.md` (or `CLAUDE.md`, `GEMINI.md`), any nested one
+  for the area
   the work touches, and the scoped rule files that apply to it.
 
 **Size the scope here**, per that same section: a request spanning
@@ -113,7 +117,11 @@ Every prompt MUST carry the Stage 0 material, the Stage 1 returns, and
 that section's constraints, copied in full — YAGNI, design for isolation,
 follow what is already here, and the project's priority ordering as a
 tie-breaker only. They bind every option **before** it is offered, and
-the agent cannot load the skill itself.
+the agent cannot load the skill itself. Under Antigravity and Codex,
+every prompt MUST also carry `<base>/../../agents/scout.md`'s Hard
+constraints (`<base>` being this skill's base directory), with the
+steering loop checking `git status --porcelain --ignored=matching` before
+and after Stage 1 and Stage 2.
 
 `agent-kit:software-architect` cannot fetch, so give it the tracker
 material as **files**, not as a summary: write the issue body and its full

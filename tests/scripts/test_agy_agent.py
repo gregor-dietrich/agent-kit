@@ -9,6 +9,7 @@ farm of the few tools the wrapper needs.
 """
 
 import json
+import os
 import shutil
 import signal
 import stat
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -37,6 +39,7 @@ _BOUND = shutil.which("timeout") or shutil.which("gtimeout")
 _MODEL = "gemini-test-xhigh"
 _MESSAGE = "the final message\n"
 _PROMPT = "Review the diff.\n"
+_DEFAULT = object()
 
 _FAKE_AGY = """#!{bash}
 d="$FAKE_AGY_DIR"
@@ -59,7 +62,8 @@ exit "$(cat "$d/status")"
 
 def _stream(
     model: str | None = _MODEL,
-    permission_mode: str = "request-review",
+    permission_mode: str | None = "request-review",
+    tools: object = _DEFAULT,
     status: str = "SUCCESS",
     response: str | None = _MESSAGE,
     tokens: int | None = 12345,
@@ -68,11 +72,13 @@ def _stream(
 ) -> str:
     lines: list[str] = []
     if include_init:
-        init_body: dict[str, object] = {
-            "cwd": "/repo",
-            "tools": ["view_file", "grep_search"],
-            "permission_mode": permission_mode,
-        }
+        init_body: dict[str, object] = {"cwd": "/repo"}
+        if tools is _DEFAULT:
+            init_body["tools"] = ["view_file", "grep_search"]
+        elif tools is not None:
+            init_body["tools"] = tools
+        if permission_mode is not None:
+            init_body["permission_mode"] = permission_mode
         if model is not None:
             init_body["model"] = model
         lines.append(
@@ -114,17 +120,24 @@ class Bridge:
     opt_in: Path
     fake: Path
     bin_dir: Path
+    tmp_dir: Path
     env: dict[str, str]
 
     def run(
         self,
         *args: str,
         cwd: Path | None = None,
-        extra_env: dict[str, str] | None = None,
+        extra_env: dict[str, str | None] | None = None,
     ) -> subprocess.CompletedProcess[str]:
-        env = {**self.env, **(extra_env or {})}
+        env = dict(self.env)
+        if extra_env:
+            for key, val in extra_env.items():
+                if val is None:
+                    env.pop(key, None)
+                else:
+                    env[key] = val
         return subprocess.run(
-            ["bash", str(self.wrapper), *args],
+            [str(self.wrapper), *args],
             cwd=cwd or self.project,
             env=env,
             capture_output=True,
@@ -149,6 +162,7 @@ class Bridge:
 
 @pytest.fixture
 def bridge(tmp_path: Path) -> Bridge:
+    tmp_path = tmp_path.resolve()
     kit = tmp_path / "kit"
     (kit / "scripts").mkdir(parents=True)
     (kit / "agents").mkdir()
@@ -156,10 +170,6 @@ def bridge(tmp_path: Path) -> Bridge:
     shutil.copy2(_SCRIPT, wrapper)
     (kit / "agents" / "code-reviewer.md").write_text(_role(), encoding="utf-8")
     (kit / "agents" / "scout.md").write_text(_role(None), encoding="utf-8")
-
-    project = tmp_path / "project"
-    project.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=project, check=True, timeout=30)
 
     prompt = tmp_path / "prompt.md"
     prompt.write_text(_PROMPT, encoding="utf-8")
@@ -191,14 +201,32 @@ def bridge(tmp_path: Path) -> Bridge:
     )
     agy_bin.chmod(agy_bin.stat().st_mode | stat.S_IXUSR)
 
+    tmp_dir = tmp_path / "tmp"
+    tmp_dir.mkdir()
+
     env = {
         "PATH": str(bin_dir),
         "HOME": str(tmp_path / "home"),
         "XDG_CONFIG_HOME": str(xdg),
-        "TMPDIR": str(tmp_path),
+        "TMPDIR": str(tmp_dir),
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CEILING_DIRECTORIES": str(tmp_path),
         "FAKE_AGY_DIR": str(fake),
     }
-    return Bridge(wrapper, kit, project, prompt, opt_in, fake, bin_dir, env)
+
+    project = tmp_path / "project"
+    project.mkdir()
+    subprocess.run(
+        ["git", "-c", "init.defaultBranch=main", "init", "-q"],
+        cwd=project,
+        env=env,
+        check=True,
+        timeout=30,
+    )
+    return Bridge(
+        wrapper, kit, project, prompt, opt_in, fake, bin_dir, tmp_dir, env
+    )
 
 
 def test_verified_run_prints_response_and_tokens(bridge: Bridge) -> None:
@@ -208,22 +236,29 @@ def test_verified_run_prints_response_and_tokens(bridge: Bridge) -> None:
     assert "tokens used (normalised): 12345" in res.stderr
     assert "Pin verified" in res.stderr
     argv = bridge.argv()
-    assert "--input-format" in argv and "stream-json" in argv
-    assert "--output-format" in argv
+    pairs = list(pairwise(argv))
+    assert ("--input-format", "stream-json") in pairs
+    assert ("--output-format", "stream-json") in pairs
+    assert ("--model", _MODEL) in pairs
+    assert ("--print-timeout", "7200s") in pairs
+    assert "--sandbox" in argv
     assert "--disable-slash-commands" in argv
-    idx = argv.index("--model")
-    assert argv[idx + 1] == _MODEL
     settings = json.loads(argv[argv.index("--settings") + 1])
-    deny_rules = settings["permissions"]["deny"]
-    assert "write_file(*)" in deny_rules
-    assert "command(*)" in deny_rules
-    assert "mcp(*)" in deny_rules
     assert settings["permissions"]["allow"] == ["read_file(*)"]
+    assert set(settings["permissions"]["deny"]) == {
+        "write_file(*)",
+        "command(*)",
+        "mcp(*)",
+        "read_url(*)",
+        "execute_url(*)",
+        "download_url(*)",
+    }
     ev = bridge.stdin_event()
     assert ev["event"] == "user"
     content = str(ev["message"]["content"])  # type: ignore[index]
     assert str(bridge.kit / "agents" / "code-reviewer.md") in content
     assert _PROMPT in content
+    assert not any(bridge.tmp_dir.iterdir())
 
 
 def test_real_stream_json_fixture_verifies(bridge: Bridge) -> None:
@@ -239,12 +274,131 @@ def test_real_stream_json_fixture_verifies(bridge: Bridge) -> None:
     assert "tokens used (normalised): 11574" in res.stderr
 
 
+def test_shipped_code_reviewer_pin_verifies(bridge: Bridge) -> None:
+    shipped = _ROOT / "agents" / "code-reviewer.md"
+    shutil.copy2(shipped, bridge.kit / "agents" / "code-reviewer.md")
+    pin_model = next(
+        line.split(": ", 1)[1].strip()
+        for line in shipped.read_text(encoding="utf-8").splitlines()
+        if line.startswith("agy-model:")
+    )
+    (bridge.fake / "stdout").write_text(
+        _stream(model=pin_model), encoding="utf-8"
+    )
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == _MESSAGE
+    assert ("--model", pin_model) in list(pairwise(bridge.argv()))
+    assert "--sandbox" in bridge.argv()
+
+
+@pytest.mark.parametrize(
+    "role_name",
+    sorted(
+        p.stem
+        for p in (_ROOT / "agents").glob("*.md")
+        if p.stem != "code-reviewer"
+    ),
+)
+def test_shipped_roles_without_agy_model_are_refused(
+    bridge: Bridge, role_name: str
+) -> None:
+    shutil.copy2(
+        _ROOT / "agents" / f"{role_name}.md",
+        bridge.kit / "agents" / f"{role_name}.md",
+    )
+    res = bridge.run(role_name, str(bridge.prompt))
+    assert res.returncode == 2
+    assert "no agy-model key" in res.stderr
+    assert bridge.calls() == []
+
+
+def test_skill_references_executable_agy_bridge() -> None:
+    skill_md = _ROOT / "skills" / "ai-review" / "SKILL.md"
+    assert "<base>/../../scripts/agy-agent.sh" in skill_md.read_text(
+        encoding="utf-8"
+    )
+    assert _SCRIPT.is_file()
+    assert os.access(_SCRIPT, os.X_OK)
+
+
 def test_missing_opt_in_refuses_without_calling_agy(bridge: Bridge) -> None:
     bridge.opt_in.unlink()
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert res.returncode == 2
     assert "not opted in" in res.stderr
     assert bridge.calls() == []
+
+
+def test_relative_xdg_config_home_does_not_grant_consent(
+    bridge: Bridge,
+) -> None:
+    bridge.opt_in.unlink()
+    rel = bridge.project / "rel-xdg" / "agent-kit"
+    rel.mkdir(parents=True)
+    (rel / "agy-bridge").touch()
+    res = bridge.run(
+        "code-reviewer",
+        str(bridge.prompt),
+        extra_env={"XDG_CONFIG_HOME": "rel-xdg"},
+    )
+    assert res.returncode == 2
+    assert "not opted in" in res.stderr
+    assert bridge.calls() == []
+
+
+@pytest.mark.parametrize("xdg_val", [None, "rel-xdg"])
+def test_home_config_fallback_for_unset_or_relative_xdg(
+    bridge: Bridge, xdg_val: str | None
+) -> None:
+    bridge.opt_in.unlink()
+    home_opt_in = Path(bridge.env["HOME"]) / ".config" / "agent-kit"
+    home_opt_in.mkdir(parents=True)
+    (home_opt_in / "agy-bridge").touch()
+    res = bridge.run(
+        "code-reviewer",
+        str(bridge.prompt),
+        extra_env={"XDG_CONFIG_HOME": xdg_val},
+    )
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == _MESSAGE
+
+
+@pytest.mark.parametrize(
+    "rel_path",
+    [
+        ".agents/hooks.json",
+        ".agent/mcp_config.json",
+        "_agents/plugins.json",
+        "_agent/plugins/",
+    ],
+)
+def test_repo_local_config_is_refused(bridge: Bridge, rel_path: str) -> None:
+    target = bridge.project / rel_path
+    if rel_path.endswith("/"):
+        target.mkdir(parents=True)
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}\n", encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 2
+    assert rel_path in res.stderr
+    assert "AGY_AGENT_ALLOW_REPO_CONFIG=1" in res.stderr
+    assert bridge.calls() == []
+
+
+def test_allow_repo_config_env_permits_verified_run(bridge: Bridge) -> None:
+    cfg = bridge.project / ".agents" / "hooks.json"
+    cfg.parent.mkdir(parents=True)
+    cfg.write_text("{}\n", encoding="utf-8")
+    (bridge.project / "_agent" / "plugins").mkdir(parents=True)
+    res = bridge.run(
+        "code-reviewer",
+        str(bridge.prompt),
+        extra_env={"AGY_AGENT_ALLOW_REPO_CONFIG": "1"},
+    )
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == _MESSAGE
 
 
 def test_role_without_agy_model_is_refused(bridge: Bridge) -> None:
@@ -263,6 +417,27 @@ def test_unknown_or_traversal_role_is_refused(
     res = bridge.run(bad_role, str(bridge.prompt))
     assert res.returncode == 2
     assert "unknown role" in res.stderr
+    assert bridge.calls() == []
+
+
+@pytest.mark.parametrize(
+    "bad_pin",
+    [
+        '"gemini-test"',
+        "'gemini-test'",
+        "gemini-test # comment",
+        "gemini test",
+    ],
+)
+def test_quoted_or_commented_agy_model_refused(
+    bridge: Bridge, bad_pin: str
+) -> None:
+    (bridge.kit / "agents" / "code-reviewer.md").write_text(
+        _role(bad_pin), encoding="utf-8"
+    )
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 2
+    assert "write it bare" in res.stderr
     assert bridge.calls() == []
 
 
@@ -294,14 +469,71 @@ def test_missing_init_event_exits_3(bridge: Bridge) -> None:
     assert "no init event" in res.stderr
 
 
-def test_always_proceed_permission_mode_exits_3(bridge: Bridge) -> None:
+def test_duplicate_init_event_exits_3(bridge: Bridge) -> None:
+    init_only = _stream(include_result=False)
+    (bridge.fake / "stdout").write_text(init_only + _stream(), encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 3
+    assert res.stdout == ""
+    assert "init event count" in res.stderr
+
+
+@pytest.mark.parametrize(
+    "perm_mode", [None, "auto", "accept-edits", "always-proceed"]
+)
+def test_unexpected_permission_mode_exits_3(
+    bridge: Bridge, perm_mode: str | None
+) -> None:
     (bridge.fake / "stdout").write_text(
-        _stream(permission_mode="always-proceed"), encoding="utf-8"
+        _stream(permission_mode=perm_mode), encoding="utf-8"
     )
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert res.returncode == 3
     assert res.stdout == ""
-    assert "always-proceed" in res.stderr
+    assert "permission_mode" in res.stderr
+    if perm_mode is not None:
+        assert perm_mode in res.stderr
+
+
+@pytest.mark.parametrize(
+    "bad_tools",
+    [
+        None,
+        [],
+        ["run_command"],
+        ["write_file"],
+        ["view_file", "search_web"],
+    ],
+)
+def test_unexpected_init_tools_exits_3(
+    bridge: Bridge, bad_tools: list[str] | None
+) -> None:
+    (bridge.fake / "stdout").write_text(
+        _stream(tools=bad_tools), encoding="utf-8"
+    )
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 3
+    assert res.stdout == ""
+    assert "unexpected tools" in res.stderr
+
+
+def test_missing_result_event_exits_3(bridge: Bridge) -> None:
+    (bridge.fake / "stdout").write_text(
+        _stream(include_result=False), encoding="utf-8"
+    )
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 3
+    assert res.stdout == ""
+    assert "no result event" in res.stderr
+
+
+def test_duplicate_result_event_exits_3(bridge: Bridge) -> None:
+    err_res = _stream(include_init=False, status="ERROR")
+    (bridge.fake / "stdout").write_text(_stream() + err_res, encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 3
+    assert res.stdout == ""
+    assert "result event count" in res.stderr
 
 
 def test_non_success_result_exits_3(bridge: Bridge) -> None:
@@ -331,18 +563,93 @@ def test_missing_usage_reports_tokens_unavailable(bridge: Bridge) -> None:
     assert "tokens unavailable; never estimate." in res.stderr
 
 
-def test_transcript_is_saved_and_existing_path_refused(
+def test_non_utf8_prompt_encodes_with_replacement(bridge: Bridge) -> None:
+    bridge.prompt.write_bytes(b"Review bytes: \xff\xfe end\n")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == _MESSAGE
+    content = str(bridge.stdin_event()["message"]["content"])  # type: ignore[index]
+    assert "\ufffd" in content
+
+
+def test_pre_dispatch_encoding_failure_leaves_no_transcript(
+    bridge: Bridge, tmp_path: Path
+) -> None:
+    py = bridge.bin_dir / "python3"
+    py.unlink()
+    py.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    py.chmod(0o755)
+    transcript = tmp_path / "no-leak.jsonl"
+    res = bridge.run("code-reviewer", str(bridge.prompt), str(transcript))
+    assert res.returncode == 2
+    assert "failed to encode prompt file" in res.stderr
+    assert not transcript.exists()
+    assert not transcript.is_symlink()
+    assert bridge.calls() == ["--version"]
+    assert not (bridge.fake / "argv").exists()
+
+
+@pytest.mark.parametrize(
+    ("agy_status", "model", "expected_code"),
+    [("7", _MODEL, 7), ("0", "gemini-wrong", 3)],
+)
+def test_failure_surfaces_bounded_stderr_and_transcript(
+    bridge: Bridge,
+    tmp_path: Path,
+    agy_status: str,
+    model: str,
+    expected_code: int,
+) -> None:
+    diag = "".join(f"diag-line-{i}\n" for i in range(1, 26))
+    (bridge.fake / "stderr").write_text(diag, encoding="utf-8")
+    (bridge.fake / "status").write_text(f"{agy_status}\n", encoding="utf-8")
+    (bridge.fake / "stdout").write_text(_stream(model=model), encoding="utf-8")
+    transcript = tmp_path / "run.jsonl"
+    res = bridge.run("code-reviewer", str(bridge.prompt), str(transcript))
+    assert res.returncode == expected_code
+    assert res.stdout == ""
+    assert "diag-line-1\n" in res.stderr
+    assert "diag-line-20\n" in res.stderr
+    assert "diag-line-21\n" not in res.stderr
+    assert f"agy transcript: {transcript}" in res.stderr
+
+
+def test_success_does_not_leak_agy_stderr(bridge: Bridge) -> None:
+    (bridge.fake / "stderr").write_text("quiet-on-success\n", encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 0, res.stderr
+    assert "quiet-on-success" not in res.stderr
+
+
+def test_transcript_is_saved_with_private_mode(
     bridge: Bridge, tmp_path: Path
 ) -> None:
     transcript = tmp_path / "run.jsonl"
     res = bridge.run("code-reviewer", str(bridge.prompt), str(transcript))
     assert res.returncode == 0
     assert transcript.is_file()
+    assert stat.S_IMODE(transcript.stat().st_mode) == 0o600
     assert '"event": "init"' in transcript.read_text(encoding="utf-8")
 
-    again = bridge.run("code-reviewer", str(bridge.prompt), str(transcript))
-    assert again.returncode == 2
-    assert "transcript path already exists" in again.stderr
+
+@pytest.mark.parametrize("kind", ["file", "dangling", "prompt"])
+def test_existing_transcript_path_is_refused(
+    bridge: Bridge, tmp_path: Path, kind: str
+) -> None:
+    target = tmp_path / "dangling-target"
+    transcript = tmp_path / "existing.jsonl"
+    if kind == "file":
+        transcript.write_text("keep\n", encoding="utf-8")
+    elif kind == "dangling":
+        transcript.symlink_to(target)
+    else:
+        transcript = bridge.prompt
+    res = bridge.run("code-reviewer", str(bridge.prompt), str(transcript))
+    assert res.returncode == 2
+    assert "transcript path already exists" in res.stderr
+    assert bridge.calls() == []
+    assert bridge.prompt.read_text(encoding="utf-8") == _PROMPT
+    assert not target.exists()
 
 
 def test_relative_transcript_resolves_against_caller_cwd(
@@ -358,33 +665,133 @@ def test_relative_transcript_resolves_against_caller_cwd(
     )
 
 
-def test_invalid_timeout_is_refused(bridge: Bridge) -> None:
+def test_cdpath_cannot_redirect_kit_root(
+    bridge: Bridge, tmp_path: Path
+) -> None:
+    decoy = tmp_path / "decoy"
+    (decoy / "scripts").mkdir(parents=True)
+    subprocess.run(
+        ["git", "-c", "init.defaultBranch=main", "init", "-q"],
+        cwd=bridge.kit,
+        env=bridge.env,
+        check=True,
+        timeout=30,
+    )
+    res = subprocess.run(
+        ["scripts/agy-agent.sh", "code-reviewer", str(bridge.prompt)],
+        cwd=bridge.kit,
+        env={**bridge.env, "CDPATH": str(decoy)},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert res.returncode == 0, res.stderr
+    role_file = bridge.kit / "agents" / "code-reviewer.md"
+    content = str(bridge.stdin_event()["message"]["content"])  # type: ignore[index]
+    assert f"instructions are in {role_file};" in content
+
+
+@pytest.mark.skipif(not _BOUND, reason="no timeout/gtimeout on PATH")
+def test_wall_clock_timeout_exits_124(bridge: Bridge) -> None:
+    (bridge.fake / "sleep").write_text("30\n", encoding="utf-8")
     res = bridge.run(
         "code-reviewer",
         str(bridge.prompt),
-        extra_env={"AGY_AGENT_TIMEOUT": "0"},
+        extra_env={"AGY_AGENT_TIMEOUT": "1"},
+    )
+    assert res.returncode == 124
+    assert "1-second bound" in res.stderr
+
+
+def test_without_timeout_binary_still_succeeds(bridge: Bridge) -> None:
+    if _BOUND:
+        (bridge.bin_dir / Path(_BOUND).name).unlink()
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == _MESSAGE
+
+
+@pytest.mark.parametrize("bad_timeout", ["0", "2h", "-5"])
+def test_invalid_timeout_is_refused(bridge: Bridge, bad_timeout: str) -> None:
+    res = bridge.run(
+        "code-reviewer",
+        str(bridge.prompt),
+        extra_env={"AGY_AGENT_TIMEOUT": bad_timeout},
     )
     assert res.returncode == 2
     assert "AGY_AGENT_TIMEOUT" in res.stderr
     assert bridge.calls() == []
 
 
-def test_sigterm_stops_child_process(bridge: Bridge) -> None:
-    (bridge.fake / "sleep").write_text("30\n", encoding="utf-8")
+@pytest.mark.parametrize("count", [0, 1, 4])
+def test_wrong_arg_count_is_refused(bridge: Bridge, count: int) -> None:
+    args = ["code-reviewer", str(bridge.prompt), "out.jsonl", "extra"]
+    res = bridge.run(*args[:count])
+    assert res.returncode == 2
+    assert "usage:" in res.stderr
+    assert bridge.calls() == []
+
+
+@pytest.mark.parametrize("content", [None, ""])
+def test_missing_or_empty_prompt_is_refused(
+    bridge: Bridge, content: str | None
+) -> None:
+    if content is None:
+        bridge.prompt.unlink()
+    else:
+        bridge.prompt.write_text(content, encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 2
+    assert "prompt file" in res.stderr
+    assert bridge.calls() == []
+
+
+@pytest.mark.parametrize("binary", ["agy", "python3"])
+def test_missing_required_binary_is_refused(
+    bridge: Bridge, binary: str
+) -> None:
+    (bridge.bin_dir / binary).unlink()
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 2
+    assert "not installed" in res.stderr
+    assert bridge.calls() == []
+
+
+def test_outside_git_repo_is_refused(bridge: Bridge, tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    res = bridge.run("code-reviewer", str(bridge.prompt), cwd=outside)
+    assert res.returncode == 2
+    assert "git repository" in res.stderr
+    assert bridge.calls() == []
+
+
+@pytest.mark.parametrize("bounded", [True, False])
+def test_sigterm_stops_child_process(bridge: Bridge, bounded: bool) -> None:
+    if bounded and not _BOUND:
+        pytest.skip("no timeout/gtimeout on PATH")
+    if not bounded and _BOUND:
+        (bridge.bin_dir / Path(_BOUND).name).unlink()
+    (bridge.fake / "sleep").write_text("2\n", encoding="utf-8")
     proc = subprocess.Popen(
-        ["bash", str(bridge.wrapper), "code-reviewer", str(bridge.prompt)],
+        [str(bridge.wrapper), "code-reviewer", str(bridge.prompt)],
         cwd=bridge.project,
         env=bridge.env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
     )
-    deadline = time.monotonic() + 10
+    deadline = time.monotonic() + 30
     started = bridge.fake / "started"
-    while not started.exists() and time.monotonic() < deadline:
+    while not started.exists():
+        assert proc.poll() is None and time.monotonic() < deadline
         time.sleep(0.05)
-    assert started.exists()
-    proc.send_signal(signal.SIGTERM)
-    proc.communicate(timeout=10)
-    assert proc.returncode == 128 + signal.SIGTERM
+    sent_at = time.monotonic()
+    proc.terminate()
+    out, _ = proc.communicate(timeout=30)
+    assert (proc.returncode, out) == (128 + signal.SIGTERM, "")
+    remaining = sent_at + 3.0 - time.monotonic()
+    if remaining > 0:
+        time.sleep(remaining)
     assert not (bridge.fake / "survived").exists()

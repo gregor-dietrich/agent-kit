@@ -16,6 +16,48 @@ _PINS = {
     "backend-developer": ("sonnet", "flash", "gpt-6.1-sol", "high"),
     "frontend-developer": ("sonnet", "flash", "gpt-6.1-sol", "high"),
 }
+_AGY_READ_ONLY_TOOLS = [
+    "read_file",
+    "run_command",
+    "manage_task",
+    "send_message",
+]
+_AGY_WRITER_TOOLS = [
+    "read_file",
+    "edit_file",
+    "write_file",
+    "run_command",
+    "manage_task",
+    "send_message",
+]
+_AGY_TOOLS = {
+    "code-reviewer": _AGY_READ_ONLY_TOOLS,
+    "software-architect": _AGY_READ_ONLY_TOOLS,
+    "scout": _AGY_READ_ONLY_TOOLS,
+    "backend-developer": _AGY_WRITER_TOOLS,
+    "frontend-developer": _AGY_WRITER_TOOLS,
+}
+_CLAUDE_TOOLS = {
+    "code-reviewer": "Read, Grep, Glob",
+    "software-architect": "Read, Grep, Glob",
+    "scout": "Read, Grep, Glob, Bash",
+    "backend-developer": "Read, Write, Edit, Grep, Glob, Bash",
+    "frontend-developer": "Read, Write, Edit, Grep, Glob, Bash",
+}
+_NON_CLAUDE_KEYS = (
+    "codex-model",
+    "codex-effort",
+    "codex-sandbox",
+    "agy-model",
+    "subagent",
+    "mainAgent",
+    "commandExecutionPolicy",
+)
+_AGY_PIN_COPY_RE = re.compile(
+    r"`model:\s*(?:inherit|pro|flash|flash_lite)`"
+    r"|\bpin\s+`(?:inherit|pro|flash|flash_lite)`",
+    re.IGNORECASE,
+)
 
 
 def _frontmatter(path: Path) -> dict[str, str]:
@@ -26,6 +68,32 @@ def _frontmatter(path: Path) -> dict[str, str]:
     # The bridge's awk reads the first of a duplicate key, dict the last.
     assert len({key for key, _ in pairs}) == len(pairs), path
     return dict(pairs)
+
+
+def _frontmatter_lists(path: Path) -> dict[str, list[str]]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "---", path
+    block = lines[1 : lines.index("---", 1)]
+    lists: dict[str, list[str]] = {}
+    current: str | None = None
+    for line in block:
+        if re.fullmatch(r"[A-Za-z0-9_-]+:\s*\[.*\]\s*", line):
+            key, raw = line.split(":", 1)
+            assert key not in lists, (path, key)
+            inner = raw.strip()[1:-1].strip()
+            items = [part.strip() for part in inner.split(",")] if inner else []
+            lists[key] = items
+            current = None
+        elif re.fullmatch(r"[A-Za-z0-9_-]+:\s*", line):
+            key = line.split(":", 1)[0]
+            assert key not in lists, (path, key)
+            lists[key] = []
+            current = key
+        elif current is not None and line.startswith("  - "):
+            lists[current].append(line[4:].strip())
+        else:
+            current = None
+    return lists
 
 
 def _body(path: Path) -> str:
@@ -66,6 +134,25 @@ def test_every_role_carries_all_clients_pins() -> None:
         ) == (agy_tier, codex_m, codex_e), role
 
 
+def test_role_tools_and_client_metadata() -> None:
+    for role in _PINS:
+        agy_path = _AGENTS / f"{role}.md"
+        claude_path = _CLAUDE_AGENTS / f"{role}.md"
+        agy_front = _frontmatter(agy_path)
+        agy_lists = _frontmatter_lists(agy_path)
+        assert agy_lists.get("tools") == _AGY_TOOLS[role], role
+        assert (
+            agy_front.get("subagent"),
+            agy_front.get("mainAgent"),
+            agy_front.get("commandExecutionPolicy"),
+        ) == ("true", "false", "sandbox"), role
+        claude_front = _frontmatter(claude_path)
+        assert claude_front.get("tools") == _CLAUDE_TOOLS[role], role
+        assert not _frontmatter_lists(claude_path), role
+        for key in _NON_CLAUDE_KEYS:
+            assert key not in claude_front, (role, key)
+
+
 def test_claude_and_antigravity_role_bodies_stay_identical() -> None:
     for role in _PINS:
         agy_path = _AGENTS / f"{role}.md"
@@ -95,7 +182,9 @@ def test_only_the_reviewer_carries_bridge_pins() -> None:
 def test_skill_bodies_fit_antigravity_size_cap() -> None:
     # Antigravity truncates any SKILL.md body past 24,000 bytes; bulk
     # reference material belongs under skills/<name>/references/.
-    for path in (_ROOT / "skills").glob("*/SKILL.md"):
+    paths = list((_ROOT / "skills").glob("*/SKILL.md"))
+    assert paths
+    for path in paths:
         body = _body(path)
         assert len(body.encode("utf-8")) <= 24_000, path
 
@@ -121,6 +210,8 @@ def test_no_shipped_prose_copies_a_model_pin() -> None:
             _ROOT / "README.md",
             _ROOT / "AGENTS.md",
             *(_ROOT / "scripts").glob("*.sh"),
+            *(_ROOT / "hooks").glob("*.json"),
+            *(_ROOT / "hooks").glob("*.sh"),
             *(_ROOT / "hooks").glob("*.py"),
             *(_ROOT / ".claude-plugin").glob("*.json"),
             *(_ROOT / ".codex-plugin").glob("*.json"),
@@ -135,6 +226,23 @@ def test_no_shipped_prose_copies_a_model_pin() -> None:
         for number, line in enumerate(text.splitlines(), 1)
         for value in sorted(values)
         if re.search(rf"\b{re.escape(value)}\b", line, re.IGNORECASE)
+    ]
+    assert not hits, "\n".join(hits)
+
+
+def test_no_shipped_prose_copies_antigravity_role_pins() -> None:
+    paths = [
+        *(_ROOT / "skills").glob("**/*.md"),
+        _ROOT / "README.md",
+        _ROOT / "AGENTS.md",
+        _ROOT / "hooks" / "session-context.md",
+    ]
+    hits = [
+        str(path.relative_to(_ROOT))
+        for path in paths
+        if _AGY_PIN_COPY_RE.search(
+            " ".join(path.read_text(encoding="utf-8").split())
+        )
     ]
     assert not hits, "\n".join(hits)
 
@@ -196,10 +304,23 @@ def test_each_dispatching_skill_points_at_the_pin_contract(
         ),
         pytest.param(
             "skills/delegation/SKILL.md",
-            "`.claude/rules`, `.agents`, the decisions log, every project"
-            " skill or command (`.claude/skills`, `.claude/commands`), used"
-            " or not",
+            "`.claude/rules`, `.agents`, `.agent`, `_agents`, `_agent`, the"
+            " decisions log, every project skill or command"
+            " (`.claude/skills`, `.claude/commands`), used or not",
             id="review-lists-instruction-files",
+        ),
+        pytest.param(
+            "skills/delegation/SKILL.md",
+            "the `agents/`, `skills/` and `plugins/` directories under"
+            " `.agents/`, `.agent/`, `_agents/` and `_agent/`",
+            id="review-lists-antigravity-reviewer-dirs",
+        ),
+        pytest.param(
+            "skills/delegation/SKILL.md",
+            "`hooks.json`, `mcp_config.json`, `plugins.json`,"
+            " `skills.json`, `rules.json` and `plugins/` directories under"
+            " `.agents/`, `.agent/`, `_agents/` and `_agent/`",
+            id="review-lists-antigravity-settings-files",
         ),
         pytest.param(
             "skills/delegation/SKILL.md",
@@ -535,6 +656,16 @@ def test_each_dispatching_skill_points_at_the_pin_contract(
         ),
         pytest.param(
             "agents/scout.md",
+            "A nested agent session (`claude -p`, `codex exec`, `agy -p`)",
+            id="empirical-probe-includes-agy",
+        ),
+        pytest.param(
+            "agents/scout.md",
+            "`--mode` (`accept-edits`, `auto`), `always-proceed`",
+            id="empirical-probe-bans-agy-loosening-modes",
+        ),
+        pytest.param(
+            "agents/scout.md",
             "## Hard constraints",
             id="scout-keeps-its-hard-constraints-heading",
         ),
@@ -610,7 +741,7 @@ def test_safety_anchor_survives(path: str, anchor: str) -> None:
 def test_no_skill_calls_the_model_pin_the_source_of_truth() -> None:
     hits = [
         f"{path.relative_to(_ROOT)}:{number}"
-        for path in (_ROOT / "skills").glob("**/SKILL.md")
+        for path in (_ROOT / "skills").glob("**/*.md")
         for number, line in enumerate(
             path.read_text(encoding="utf-8").splitlines(), 1
         )

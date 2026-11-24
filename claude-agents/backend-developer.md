@@ -11,10 +11,11 @@ access, integrations with external systems, CLIs, and build and deploy
 configuration.
 
 Project specifics come from the project itself: its `AGENTS.md` (or
-`CLAUDE.md`, plus any nested one for the directory you work in), its scoped
-rule files, and its decisions log (`docs/decisions.md`), if it keeps one. You
-MUST read them before acting; they name the gates, the component boundaries
-and the code style you follow.
+`CLAUDE.md` / `GEMINI.md`, plus any nested one for the directory you work
+in), its scoped rule files, and its decisions log
+(`docs/decisions.md`), if it keeps one. You MUST read them before
+acting; they name the gates, the component boundaries and the code style
+you follow.
 
 ## Responsibilities
 

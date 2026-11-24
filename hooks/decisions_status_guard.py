@@ -78,6 +78,7 @@ from pathlib import Path
 from typing import Any
 
 from hook_lib import (
+    ANTIGRAVITY_FILE_TOOLS,
     PATCH_FILE,
     PATCH_MOVE,
     absolute_path,
@@ -402,14 +403,12 @@ def _existing_logs(payload: dict[str, Any]) -> list[Path]:
     ]
 
 
-_ANTIGRAVITY_TOOLS = {
-    "write_file",
-    "write_to_file",
-    "edit_file",
-    "replace_file_content",
-    "multi_replace_file_content",
-    "sed_file",
-}
+def _split_lines_lf(text: str) -> list[str]:
+    """Split *text* on LF only, keeping line endings."""
+    lines = re.split(r"(?<=\n)", text)
+    if lines[-1] == "":
+        lines.pop()
+    return lines
 
 
 def _line_range(chunk: dict[str, Any]) -> tuple[int, int] | None:
@@ -434,12 +433,15 @@ def _apply_chunk(before: str, chunk: dict[str, Any]) -> str | None:
         return None
     if not target:
         return None
+    allow_multi = chunk.get("AllowMultiple", False)
+    if not isinstance(allow_multi, bool):
+        return None
     has_bounds = "StartLine" in chunk or "EndLine" in chunk
     if has_bounds:
         bounds = _line_range(chunk)
         if bounds is None:
             return None
-        lines = before.splitlines(keepends=True)
+        lines = _split_lines_lf(before)
         start, end = bounds
         if end > len(lines):
             return None
@@ -449,7 +451,7 @@ def _apply_chunk(before: str, chunk: dict[str, Any]) -> str | None:
     else:
         prefix, window, suffix = "", before, ""
     hits = window.count(target)
-    if hits == 0 or (hits > 1 and not chunk.get("AllowMultiple")):
+    if hits == 0 or (hits > 1 and not allow_multi):
         return None
     return prefix + window.replace(target, replacement) + suffix
 
@@ -464,24 +466,22 @@ def _apply_multi_chunks(before: str, raw_chunks: Any) -> str | None:
         return None
     chunks: list[dict[str, Any]] = raw_chunks
     bounded = ["StartLine" in c or "EndLine" in c for c in chunks]
-    if any(bounded) and not all(bounded):
+    if not all(bounded):
         return None
-    if all(bounded):
-        ranges = [_line_range(c) for c in chunks]
-        if any(r is None for r in ranges):
+    ranges = [_line_range(c) for c in chunks]
+    if any(r is None for r in ranges):
+        return None
+    ordered = sorted(
+        zip(ranges, chunks),
+        key=lambda item: item[0],  # type: ignore[arg-type,return-value]
+    )
+    for (_, prev_end), (next_start, _) in zip(
+        (r for r, _ in ordered), (r for r, _ in ordered[1:])
+    ):  # type: ignore[misc]
+        if next_start <= prev_end:
             return None
-        ordered = sorted(
-            zip(ranges, chunks),
-            key=lambda item: item[0],  # type: ignore[arg-type,return-value]
-        )
-        for (_, prev_end), (next_start, _) in zip(
-            (r for r, _ in ordered), (r for r, _ in ordered[1:])
-        ):  # type: ignore[misc]
-            if next_start <= prev_end:
-                return None
-        chunks = [c for _, c in reversed(ordered)]
     after = before
-    for chunk in chunks:
+    for _, chunk in reversed(ordered):
         updated = _apply_chunk(after, chunk)
         if updated is None:
             return None
@@ -494,14 +494,23 @@ def _antigravity_after(
 ) -> str | None:
     """Simulated text of docs/decisions.md after an Antigravity edit tool."""
     if tool == "write_file":
-        content = str(ti.get("Content", "") or "")
-        return before + content if ti.get("Append") else content
+        content = ti.get("Content")
+        append = ti.get("Append", False)
+        if not isinstance(content, str) or not isinstance(append, bool):
+            return None
+        return before + content if append else content
     if tool == "write_to_file":
-        return str(ti.get("CodeContent", "") or "")
+        content = ti.get("CodeContent")
+        return content if isinstance(content, str) else None
     if tool == "edit_file":
-        target = str(ti.get("Target", "") or "")
-        replacement = str(ti.get("Replacement", "") or "")
-        if not target or target not in before:
+        target = ti.get("Target")
+        replacement = ti.get("Replacement")
+        if (
+            not isinstance(target, str)
+            or not isinstance(replacement, str)
+            or not target
+            or target not in before
+        ):
             return None
         return before.replace(target, replacement)
     if tool == "replace_file_content":
@@ -540,21 +549,19 @@ def main() -> None:
             _vet(before, after)
         sys.exit(0)
 
-    if tool in _ANTIGRAVITY_TOOLS:
-        edited = _existing_logs(data)
-        if not edited:
-            sys.exit(0)
-        before = _read(edited[0])
-        after = _antigravity_after(tool, ti, before)
-        if after is None:
-            deny(
-                f"Refused: {tool} targets docs/decisions.md but the ADR "
-                "status guard cannot safely model what it would change. "
-                "Re-read the file and use edit_file or replace_file_content "
-                "with an exact target so status-marker transitions can be "
-                "vetted."
-            )
-        _vet(before, after)
+    if tool in ANTIGRAVITY_FILE_TOOLS:
+        for path in _existing_logs(data):
+            before = _read(path)
+            after = _antigravity_after(tool, ti, before)
+            if after is None:
+                deny(
+                    f"Refused: {tool} targets docs/decisions.md but the ADR "
+                    "status guard cannot safely model what it would change. "
+                    "Re-read the file and use edit_file or "
+                    "replace_file_content with an exact target so "
+                    "status-marker transitions can be vetted."
+                )
+            _vet(before, after)
         sys.exit(0)
 
     if tool not in ("Edit", "Write"):
@@ -569,10 +576,28 @@ def main() -> None:
     before = _read(edited[0])
 
     if tool == "Write":
-        after = str(ti.get("content", "") or "")
+        raw_content = ti.get("content")
+        if not isinstance(raw_content, str):
+            deny(
+                "Refused: Write targets docs/decisions.md without a string "
+                "content field, so the ADR status guard cannot safely model "
+                "what it would change."
+            )
+        after = raw_content
     else:
-        old_string = str(ti.get("old_string", "") or "")
-        new_string = str(ti.get("new_string", "") or "")
+        old_string = ti.get("old_string")
+        new_string = ti.get("new_string")
+        replace_all = ti.get("replace_all", False)
+        if (
+            not isinstance(old_string, str)
+            or not isinstance(new_string, str)
+            or not isinstance(replace_all, bool)
+        ):
+            deny(
+                "Refused: Edit targets docs/decisions.md with invalid "
+                "arguments, so the ADR status guard cannot safely model "
+                "what it would change."
+            )
         if old_string not in before:
             before, old_string, new_string = (
                 t.translate(_QUOTES) for t in (before, old_string, new_string)
@@ -581,7 +606,7 @@ def main() -> None:
             # Measured: the Edit fills a blank file, and fails on any other.
             after = before if before.strip() else new_string
         elif old_string in before:
-            count = -1 if ti.get("replace_all") else 1
+            count = -1 if replace_all else 1
             after = before.replace(old_string, new_string, count)
         else:
             deny(

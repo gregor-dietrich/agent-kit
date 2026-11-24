@@ -32,7 +32,7 @@ setup that grows the way the original did.**
 | `hooks/pipe_status_guard.py` | Denies reading a gate's exit status through a pipe (`make test \| tail`) | Any repository, either shell; gate list covers make, pytest, Maven, Gradle, npm/pnpm, cargo, go and more |
 | `hooks/tea_guard.py` | Denies a `tea` single issue/PR read without `--comments` | Gitea/`tea` only; silent everywhere else |
 | `hooks/decisions_status_guard.py` | An agent may draft and amend decisions-log entries but not ratify, de-ratify or delete them | Repositories with a `docs/decisions.md` in the format below; a no-op elsewhere |
-| `hooks/prune_session_tmp.py` | At every session start, in a detached background child, removes Claude Code session temp dirs under `claude-<uid>` untouched for 4 days, never the current or a running session. Tracks Claude Code internals as of 2.1.310 and stops pruning silently if they move | Linux; macOS unverified (#73); inert below Python 3.10 |
+| `hooks/prune_session_tmp.py` | At Claude Code and Codex session start (`hooks/hooks.json`; not registered in Antigravity's root `hooks.json`), in a detached background child, removes Claude Code session temp dirs under `claude-<uid>` untouched for 4 days, never the current or a running session. Tracks Claude Code internals as of 2.1.310 and stops pruning silently if they move | Linux; macOS unverified (#73); inert below Python 3.10 |
 | `hooks/hook_lib.py` | Shared plumbing: payload parse, deny envelope, shell tokenizer, Claude, Codex and Antigravity path resolution | Internal |
 | `hooks/session-context.md` | The four delegation rules that hold on every dispatch, injected at session start | Any repository |
 | `skills/delegation` | Pinned-dispatch policy, per-client pins, the judgment threshold, cost reports | Any repository |
@@ -110,10 +110,11 @@ rm -rf "$tmp"
 
 Under Antigravity's **Orchestrator** mode, the conversation already pairs
 a planner model with a faster executor model inside one turn. The bundled
-Antigravity roles complement that: `code-reviewer` and
-`software-architect` pin `model: inherit` (staying on your active
-Orchestrator/planner session) and omit shell and write tools, while
-`scout`, `backend-developer` and `frontend-developer` pin `model: flash`.
+Antigravity roles complement that: the judgment roles (`code-reviewer`
+and `software-architect`) stay on your active Orchestrator/planner session
+and omit write tools while keeping their sandboxed shell read-only, while
+the exploration and writing roles (`scout`, `backend-developer` and
+`frontend-developer`) run on a faster tier.
 
 The hooks run under the first `python3` on `PATH` and need 3.10 or newer.
 Under an older one — the Command Line Tools `python3` on macOS is 3.9 —
@@ -127,14 +128,22 @@ nothing, so under that `python3` it is inert.
 `/agent-kit:ai-review` Stage 1c can send a second-opinion review to
 `code-reviewer` on another vendor through two opt-in wrappers, each
 verifying the pinned model actually ran and reading its pin from
-`agents/code-reviewer.md`:
+`agents/code-reviewer.md`. Each wrapper sends the review prompt (the
+diff, the PR and issue threads, the context digest) to a second vendor,
+plus any file that vendor chooses to read, and the preamble itself
+points it at files outside the project. So each runs only once you opt
+in, with one marker file that covers every project:
 
 - **Antigravity bridge (`scripts/agy-agent.sh`)** — cross-family from
   Claude Code or Codex. Pins `agy-model` from `agents/code-reviewer.md`,
-  locks permissions read-only (no writes, shell, network or MCP) via
-  `--settings`, and verifies the model and token usage from `agy`'s
-  `stream-json` `init` and `result` events. Needs `agy` 1.5.16 or later
-  and `python3`. Opt in with:
+  runs `--sandbox` with `--settings` locking permissions read-only (no
+  writes, shell, network or MCP), refuses repositories with project-level
+  Antigravity config unless `AGY_AGENT_ALLOW_REPO_CONFIG=1` is set, and
+  verifies `model`, `permission_mode`, read-only `tools` and
+  `result.status` (and reads token usage) from `agy`'s `stream-json`
+  `init` and `result` events. Residual boundary: `agy` has no
+  `--ignore-user-config`, so user-level settings and MCP config still
+  apply. Needs `agy` 1.5.16 or later and `python3`. Opt in with:
 
   ```sh
   mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit"
@@ -145,8 +154,9 @@ verifying the pinned model actually ran and reading its pin from
   Code or Antigravity. Pins `codex-model`, `codex-effort` and
   `codex-sandbox` from `agents/code-reviewer.md` and verifies them against
   the session banner. Needs codex-cli 0.160.0 or later and passes
-  `--ignore-user-config` (auth still comes from `CODEX_HOME`). Opt in
-  with:
+  `--ignore-user-config`: your `$CODEX_HOME/config.toml` is not loaded,
+  so a custom provider or proxy setup cannot be used with it, while auth
+  still comes from `CODEX_HOME`. Opt in with:
 
   ```sh
   mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit"
@@ -164,9 +174,10 @@ A `PreToolUse` hook that crashes **fails open** — the tool call proceeds.
 So a guard broken by a bad edit is not loud, it is inert, and you find out
 when the thing it guarded against happens again. Every hook here is pinned
 by tests of what it denies _and_ of what it deliberately lets through, and
-`hooks.json` by a test that runs each registered command the way the
-clients do: each guard must deny, and the pruner must remove a stale
-session. Change a hook only with its tests.
+both `hooks/hooks.json` and root `hooks.json` by a test that runs each
+registered command the way the clients do: each guard must deny, and the
+pruner (registered in `hooks/hooks.json`) must remove a stale session.
+Change a hook only with its tests.
 
 ## Known limits
 

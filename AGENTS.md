@@ -14,8 +14,8 @@ that can break silently.
 | `.antigravity-plugin/plugin.json` | The Antigravity twin: same name and version |
 | `hooks.json` | Antigravity root hook registration (relative `./hooks/...` commands and Antigravity tool matchers) |
 | `hooks/` | `hooks.json` (read by Claude Code and Codex), the guard scripts and the session temp-dir pruner it registers, and `session-context.md`, the only text injected into every session |
-| `skills/` | One `<name>/SKILL.md` per skill, shared by all three clients (keep `SKILL.md` bodies under 24 KB for Antigravity; put bulk reference docs under `references/`) |
-| `agents/` | Antigravity-native role definitions (`model:` tiers, YAML `tools:` lists) plus Codex (`codex-model`, `codex-effort`, `codex-sandbox`) and Antigravity bridge (`agy-model`) pins |
+| `skills/` | One `<name>/SKILL.md` per skill, shared by all three clients (keep `SKILL.md` bodies at most 24,000 bytes for Antigravity; put bulk reference docs under `references/`) |
+| `agents/` | Antigravity-native role definitions (`model:` tiers, YAML `tools:` lists — `code-reviewer`, `software-architect` and `scout` omit write tools and hold sandboxed `run_command`) plus Codex (`codex-model`, `codex-effort`, `codex-sandbox`) and Antigravity bridge (`agy-model`) pins |
 | `claude-agents/` | Claude Code role definitions (`model:`, comma `tools:`), bodies kept byte-for-byte identical to `agents/` and pinned by `tests/test_role_pins.py` |
 | `scripts/` | `agy-agent.sh` and `codex-agent.sh`, the opt-in cross-family bridges ai-review Stage 1c fires |
 | `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here |

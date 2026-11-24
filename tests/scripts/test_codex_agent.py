@@ -592,6 +592,24 @@ def test_xdg_config_home_replaces_the_home_default(bridge: Bridge) -> None:
     assert bridge.calls == []
 
 
+def test_relative_xdg_config_home_in_repo_does_not_opt_in(
+    bridge: Bridge,
+) -> None:
+    _opt_in(bridge).unlink()
+    rel = bridge.project / "rel-xdg" / "agent-kit"
+    rel.mkdir(parents=True)
+    (rel / "codex-bridge").touch()
+    result = bridge.run(XDG_CONFIG_HOME="rel-xdg")
+    assert result.returncode == 2
+    assert "not opted in" in result.stderr
+    assert bridge.calls == []
+
+
+def test_relative_xdg_config_home_falls_back_to_home(bridge: Bridge) -> None:
+    result = bridge.run(XDG_CONFIG_HOME="rel-xdg")
+    assert result.returncode == 0, result.stderr
+
+
 def test_outside_a_git_repository_is_refused(bridge: Bridge) -> None:
     elsewhere = bridge.project.parent / "elsewhere"
     elsewhere.mkdir()

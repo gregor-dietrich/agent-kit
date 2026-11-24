@@ -77,7 +77,12 @@
 set -euo pipefail
 
 USAGE='usage: codex-agent.sh <role> <prompt-file> [<transcript-file>]'
-OPT_IN="${XDG_CONFIG_HOME:-${HOME:-}/.config}/agent-kit/codex-bridge"
+if [[ "${XDG_CONFIG_HOME:-}" == /* ]]; then
+	CONFIG_HOME="$XDG_CONFIG_HOME"
+else
+	CONFIG_HOME="${HOME:-}/.config"
+fi
+OPT_IN="$CONFIG_HOME/agent-kit/codex-bridge"
 MIN_VERSION='0.160.0'
 # Not the role's to choose: the vendor this bridge crosses to, and a
 # headless run that never stops to ask.
@@ -128,9 +133,10 @@ fi
 ROOT="$(git rev-parse --show-toplevel 2> /dev/null)" ||
 	die 'not inside a git repository; run from the target project.'
 
-[[ -f "$OPT_IN" ]] ||
+if [[ "$CONFIG_HOME" != /* || ! -f "$OPT_IN" ]]; then
 	die "not opted in: $OPT_IN does not exist. Codex was not called." \
 		'Create that file to let every project send reviews to Codex.'
+fi
 
 FIRST_LINE=""
 IFS= read -r FIRST_LINE < "$ROLE_FILE" || true

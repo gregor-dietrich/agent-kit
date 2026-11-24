@@ -876,6 +876,11 @@ def test_antigravity_edit_file_blocks_flip_and_allows_prose(
             {"Path": str(doc), "Target": "", "Replacement": "x"},
         )
     )
+    for bad_args in (
+        {"Path": str(doc), "Target": 123, "Replacement": "x"},
+        {"Path": str(doc), "Target": "settled one.", "Replacement": None},
+    ):
+        assert _agy_denied(_agy_call("edit_file", bad_args))
 
 
 def test_antigravity_write_file_and_write_to_file(tmp_path: Path) -> None:
@@ -924,6 +929,16 @@ def test_antigravity_write_file_and_write_to_file(tmp_path: Path) -> None:
             },
         )
     )
+    assert _agy_denied(
+        _agy_call("write_file", {"Path": str(doc), "Append": True})
+    )
+    assert _agy_denied(
+        _agy_call(
+            "write_file",
+            {"Path": str(doc), "Content": _DOC, "Append": "false"},
+        )
+    )
+    assert _agy_denied(_agy_call("write_to_file", {"TargetFile": str(doc)}))
 
 
 def test_antigravity_replace_file_content_and_bounds(tmp_path: Path) -> None:
@@ -991,10 +1006,26 @@ def test_antigravity_replace_file_content_and_bounds(tmp_path: Path) -> None:
         },
         {"TargetContent": "", "ReplacementContent": "y"},
         {"TargetContent": 123, "ReplacementContent": "y"},
+        {
+            "TargetContent": "settled one.",
+            "ReplacementContent": "settled two.",
+            "AllowMultiple": "false",
+        },
     ):
         assert _agy_denied(
             _agy_call("replace_file_content", {"TargetFile": str(doc), **bad})
         )
+    assert _agy_denied(
+        _agy_call(
+            "replace_file_content",
+            {
+                "Path": str(tmp_path / "README.md"),
+                "TargetFile": str(doc),
+                "TargetContent": "**Status:** Proposed",
+                "ReplacementContent": "**Status:** Accepted",
+            },
+        )
+    )
 
 
 def test_antigravity_multi_replace_and_sed_file(tmp_path: Path) -> None:
@@ -1084,7 +1115,119 @@ def test_antigravity_multi_replace_and_sed_file(tmp_path: Path) -> None:
                 {"TargetFile": str(doc), "ReplacementChunks": bad_chunks},
             )
         )
+    # Unbounded multi_replace_file_content fails closed even for prose edits.
+    assert _agy_denied(
+        _agy_call(
+            "multi_replace_file_content",
+            {
+                "TargetFile": str(doc),
+                "ReplacementChunks": [
+                    {
+                        "TargetContent": "draft one.",
+                        "ReplacementContent": "draft 1.",
+                    },
+                    {
+                        "TargetContent": "settled one.",
+                        "ReplacementContent": "settled 2.",
+                    },
+                ],
+            },
+        )
+    )
     # sed_file cannot be safely simulated and is denied on docs/decisions.md.
     assert _agy_denied(
         _agy_call("sed_file", {"TargetFile": str(doc), "Expression": "s/a/b/"})
     )
+
+
+def test_antigravity_replace_file_content_lf_only_lines(
+    tmp_path: Path,
+) -> None:
+    doc = _decisions_file(
+        tmp_path,
+        "## ADR-0001 — a\x0cb\n**Status:** Proposed\n**Decision:** draft.\n",
+    )
+    assert not _agy_denied(
+        _agy_call(
+            "replace_file_content",
+            {
+                "TargetFile": str(doc),
+                "StartLine": 3,
+                "EndLine": 3,
+                "TargetContent": "draft.",
+                "ReplacementContent": "draft (v2).",
+            },
+        )
+    )
+    assert _agy_denied(
+        _agy_call(
+            "replace_file_content",
+            {
+                "TargetFile": str(doc),
+                "StartLine": 2,
+                "EndLine": 2,
+                "TargetContent": "**Status:** Proposed",
+                "ReplacementContent": "**Status:** Accepted",
+            },
+        )
+    )
+
+
+def test_antigravity_relative_workspace_and_symlink_paths(
+    tmp_path: Path,
+) -> None:
+    doc = _decisions_file(tmp_path)
+    flip_args: dict[str, object] = {
+        "Path": "docs/decisions.md",
+        "Target": "**Status:** Proposed",
+        "Replacement": "**Status:** Accepted",
+    }
+    assert _agy_denied(
+        _agy_call("edit_file", flip_args, cwd=tmp_path), cwd=tmp_path.parent
+    )
+    ws_only: dict[str, object] = {
+        "hookEventName": "PreToolUse",
+        "conversationId": "0000",
+        "workspacePaths": [str(tmp_path)],
+        "toolCall": {"name": "edit_file", "args": flip_args},
+    }
+    assert _agy_denied(ws_only, cwd=tmp_path.parent)
+    link = tmp_path / "notes.md"
+    link.symlink_to(doc)
+    assert _agy_denied(
+        _agy_call(
+            "edit_file",
+            {
+                "Path": str(link),
+                "Target": "**Status:** Proposed",
+                "Replacement": "**Status:** Accepted",
+            },
+        )
+    )
+
+
+def test_claude_write_and_edit_reject_non_string_or_non_bool_args(
+    tmp_path: Path,
+) -> None:
+    empty_doc = _decisions_file(tmp_path, "")
+    assert _denied(
+        {"tool_name": "Write", "tool_input": {"file_path": str(empty_doc)}}
+    )
+    assert _denied(
+        {
+            "tool_name": "Write",
+            "tool_input": {"file_path": str(empty_doc), "content": 123},
+        }
+    )
+    doc = _decisions_file(tmp_path / "sub")
+    for bad_input in (
+        {"file_path": str(doc), "old_string": None, "new_string": "x"},
+        {"file_path": str(doc), "old_string": "settled one.", "new_string": 1},
+        {
+            "file_path": str(doc),
+            "old_string": "settled one.",
+            "new_string": "settled two.",
+            "replace_all": "false",
+        },
+    ):
+        assert _denied({"tool_name": "Edit", "tool_input": bad_input})

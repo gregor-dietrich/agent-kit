@@ -15,11 +15,24 @@ fi
 
 case "$input" in
 *'"hookEventName"'* | *'"conversationId"'*)
-	python3 -c '
+	printf '%s' "$input" | python3 -c '
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as fh:
     text = fh.read()
-print(json.dumps({"injectSteps": [{"systemMessage": {"systemMessage": text}}]}))
+try:
+    data = json.loads(sys.stdin.read())
+except ValueError:
+    data = None
+if isinstance(data, dict) and (
+    "hookEventName" in data or "conversationId" in data
+):
+    print(
+        json.dumps(
+            {"injectSteps": [{"systemMessage": {"systemMessage": text}}]}
+        )
+    )
+else:
+    sys.stdout.write(text)
 ' "$dir/session-context.md"
 	;;
 *)

@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+import hook_lib
 from hook_lib import (
     changed_paths,
     command_text,
@@ -134,6 +135,22 @@ def test_missing_command_is_empty() -> None:
     assert command_text({}) == ""
 
 
+def test_command_text_falls_back_and_prefers_agy_command_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert command_text({"command": "", "CommandLine": "echo hi"}) == "echo hi"
+    assert (
+        command_text({"command": None, "CommandLine": "echo hi"}) == "echo hi"
+    )
+    monkeypatch.setattr(hook_lib, "_ANTIGRAVITY_MODE", True)
+    assert (
+        command_text(
+            {"command": "echo safe", "CommandLine": "make test | tail -5"}
+        )
+        == "make test | tail -5"
+    )
+
+
 # --- changed_paths: Claude edits and Codex patches --------------------------
 
 
@@ -203,6 +220,10 @@ def test_captured_patch_payload_resolves_against_its_own_cwd() -> None:
 
 
 # --- captured Antigravity payloads (agy 1.5.16) -----------------------------
+#
+# agy 1.5.16 CLI emits write_file/edit_file; the 4 IDE-era tools
+# (write_to_file, replace_file_content, multi_replace_file_content, sed_file)
+# remain defensively handled.
 
 
 def test_captured_antigravity_payloads_parse_through_shared_helpers() -> None:
@@ -239,3 +260,39 @@ def test_antigravity_target_file_and_workspace_cwd_fallback(
     }
     assert tool_input(empty_args) == {}
     assert changed_paths(empty_args) == []
+
+
+def test_antigravity_path_and_target_file_handling(tmp_path: Path) -> None:
+    decoy_str: dict[str, Any] = {
+        "cwd": str(tmp_path),
+        "toolCall": {
+            "name": "replace_file_content",
+            "args": {
+                "Path": "README.md",
+                "TargetFile": "docs/decisions.md",
+            },
+        },
+    }
+    assert changed_paths(decoy_str) == [
+        tmp_path / "README.md",
+        tmp_path / "docs" / "decisions.md",
+    ]
+    non_str: dict[str, Any] = {
+        "cwd": str(tmp_path),
+        "toolCall": {
+            "name": "replace_file_content",
+            "args": {"Path": 1, "TargetFile": "docs/decisions.md"},
+        },
+    }
+    assert changed_paths(non_str) == [tmp_path / "docs" / "decisions.md"]
+    dup: dict[str, Any] = {
+        "cwd": str(tmp_path),
+        "toolCall": {
+            "name": "replace_file_content",
+            "args": {
+                "Path": "docs/decisions.md",
+                "TargetFile": "./docs/decisions.md",
+            },
+        },
+    }
+    assert changed_paths(dup) == [tmp_path / "docs" / "decisions.md"]

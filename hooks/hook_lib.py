@@ -216,14 +216,16 @@ def effective_tool(name: str, args: list[str]) -> tuple[str, list[str]]:
         return name, args
 
 
-_ANTIGRAVITY_FILE_TOOLS = {
-    "write_file",
-    "edit_file",
-    "write_to_file",
-    "replace_file_content",
-    "multi_replace_file_content",
-    "sed_file",
-}
+ANTIGRAVITY_FILE_TOOLS: frozenset[str] = frozenset(
+    {
+        "write_file",
+        "edit_file",
+        "write_to_file",
+        "replace_file_content",
+        "multi_replace_file_content",
+        "sed_file",
+    }
+)
 _ANTIGRAVITY_MODE = False
 
 
@@ -338,7 +340,10 @@ def command_text(ti: dict[str, Any]) -> str:
     argv list would yield its Python repr, which matches none of the guards'
     patterns — every Bash guard would go blind on that shape.
     """
-    raw: Any = ti.get("command") if "command" in ti else ti.get("CommandLine")
+    if _ANTIGRAVITY_MODE:
+        raw: Any = ti.get("CommandLine") or ti.get("command")
+    else:
+        raw = ti.get("command") or ti.get("CommandLine")
     if isinstance(raw, str):
         return raw
     if not isinstance(raw, list):
@@ -403,11 +408,15 @@ def changed_paths(payload: dict[str, Any]) -> list[Path]:
         if isinstance(raw, str) and raw:
             return [absolute_path(payload, raw)]
         return []
-    if tool in _ANTIGRAVITY_FILE_TOOLS:
-        raw = ti.get("Path") or ti.get("TargetFile")
-        if isinstance(raw, str) and raw:
-            return [absolute_path(payload, raw)]
-        return []
+    if tool in ANTIGRAVITY_FILE_TOOLS:
+        paths: list[Path] = []
+        for key in ("Path", "TargetFile"):
+            raw = ti.get(key)
+            if isinstance(raw, str) and raw:
+                path = absolute_path(payload, raw)
+                if path not in paths:
+                    paths.append(path)
+        return paths
     if tool != "apply_patch":
         return []
 

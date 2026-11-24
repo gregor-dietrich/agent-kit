@@ -13,7 +13,8 @@ written in uppercase.
 ## Which gate
 
 Read the scoping from the project's rules as they stand on `<base>`
-(below), not on the branch: its `AGENTS.md`/`CLAUDE.md` (nested ones for
+(below), not on the branch: its `AGENTS.md`/`CLAUDE.md`/`GEMINI.md`
+(nested ones for
 touched directories included, and what they import), its scoped rule
 files and its decisions log, where only an entry marked Accepted defines
 a gate. Read each with `git show <base>:<path>`

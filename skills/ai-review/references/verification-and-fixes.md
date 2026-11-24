@@ -162,7 +162,8 @@ produces; this stage runs only then.
 - Subagents never commit and never re-delegate; the steering loop commits.
 - **One review pass over the fixes.** Once every fix is committed, where
   the fix diff (`<pre-fix>..HEAD`, `<pre-fix>` being the HEAD the review
-  ran on) would itself fire an escalator above, one `quick` Stage 1
+  ran on) would itself fire an escalator in
+  `<base>/references/mode-selection.md`, one `quick` Stage 1
   dispatch reviews it. The escalators pick which fix diffs earn a pass;
   the prompt's findings and specs bound what it reads. Its prompt adds the
   verified findings and the fix specs, and asks it to mark each finding

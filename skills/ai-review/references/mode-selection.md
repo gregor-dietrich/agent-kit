@@ -105,9 +105,11 @@ fan-out.
 
 ## The empirical trigger — orthogonal to the mode
 
-In Claude Code and Antigravity `agent-kit:code-reviewer` has no shell, so
-it can only ever reason about code, never run it; under Codex it has a
-shell but is forbidden builds and tests, so the same holds. For an
+In Claude Code `agent-kit:code-reviewer` has no shell, so it can only ever
+reason about code, never run it; under Antigravity (where it omits write
+tools at the harness level and holds sandboxed `run_command` for read-only
+file search and listing) and Codex it has a shell but is forbidden builds
+and tests, so the same holds. For an
 ordinary diff that costs nothing: the project's test suite already
 executes the change, and a second empirical arm buys a duplicate. The
 exceptions are a diff whose code the suite does **not** itself execute, or
@@ -155,6 +157,7 @@ not know well — `auto` MUST ask rather than pick. Silently resolving to
 
 Absent that doubt, `auto` states its resolution **and the escalators that
 fired** (or that none did) as part of the stage-plan announcement in
-`SKILL.md`, then proceeds without waiting for confirmation — delegating
+`<base>/SKILL.md`, then proceeds without waiting for confirmation —
+delegating
 the choice is the point of the mode. The operator can still override
 mid-run.

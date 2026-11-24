@@ -47,4 +47,4 @@ def test_claude_manifest_lists_every_claude_agent() -> None:
         f"./claude-agents/{p.name}"
         for p in (_ROOT / "claude-agents").glob("*.md")
     }
-    assert set(listed) == on_disk
+    assert len(listed) == len(on_disk) and set(listed) == on_disk
