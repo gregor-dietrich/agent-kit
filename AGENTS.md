@@ -16,7 +16,7 @@ that can break silently.
 | `hooks/` | `hooks.json` (read by Claude Code and Codex), the guard scripts and the session temp-dir pruner it registers, and `session-context.md`, the only text injected into every session |
 | `skills/` | One `<name>/SKILL.md` per skill, shared by all three clients (keep `SKILL.md` bodies at most 24,000 bytes for Antigravity; put bulk reference docs under `references/`) |
 | `agents/` | Antigravity-native role definitions (`model:` tiers, YAML `tools:` lists — `code-reviewer`, `software-architect` and `scout` omit write tools and hold sandboxed `run_command`) plus Codex (`codex-model`, `codex-effort`, `codex-sandbox`) and Antigravity bridge (`agy-model`) pins |
-| `claude-agents/` | Claude Code role definitions (`model:`, comma `tools:`), bodies kept byte-for-byte identical to `agents/` and pinned by `tests/test_role_pins.py` |
+| `claude-agents/` | Claude Code role definitions (`model:`, comma `tools:`), bodies kept byte-for-byte identical to `agents/` and pinned by `tests/test_role_pins.py`; the manifest's `agents` list replaces Claude Code's default `agents/` scan, so the Antigravity files never load there (#94) |
 | `scripts/` | `agy-agent.sh` and `codex-agent.sh`, the opt-in cross-family bridges ai-review Stage 1c fires |
 | `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here |
 | `devkitw`, `devkit.toml` | devkit's wrapper, copied verbatim from the pinned tag and never edited, and its pin |
@@ -117,7 +117,12 @@ that can break silently.
 - `claude plugin validate .` — after any manifest, hook, skill or agent
   change. Expected warnings: the two missing `author` fields, the root
   `CLAUDE.md` not being plugin context (it is this repository's), and
-  the plugin-directory check's `ICON_MISSING`.
+  the plugin-directory check's `ICON_MISSING`. It checks the manifest,
+  not which role file a session loads: to confirm that, dispatch a role
+  with a probe that calls no tools and read `message.model` from its
+  task-output transcript. Probe a role whose two files resolve to
+  different models: an `inherit` that resolves to the role's Claude pin
+  proves nothing.
 - `agy plugin validate .` — after any manifest, hook, skill or agent
   change. Must pass with zero errors. Expected multi-tool warnings: root
   `AGENTS.md` and `hooks/hooks.json` (both are intentionally for other
