@@ -1,10 +1,14 @@
 """The plugin manifests describe one plugin across all three clients."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 _ROOT = Path(__file__).resolve().parents[1]
+_SEMVER_RE = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+)
 
 
 def _load(relative: str) -> dict[str, Any]:
@@ -48,3 +52,8 @@ def test_claude_manifest_lists_every_claude_agent() -> None:
         for p in (_ROOT / "claude-agents").glob("*.md")
     }
     assert len(listed) == len(on_disk) and set(listed) == on_disk
+
+
+def test_manifest_version_is_strict_semver() -> None:
+    version = _load(".claude-plugin/plugin.json")["version"]
+    assert isinstance(version, str) and _SEMVER_RE.fullmatch(version), version

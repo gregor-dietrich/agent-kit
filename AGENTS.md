@@ -37,20 +37,15 @@ that can break silently.
   effect it cannot model (a patch it cannot simulate, an Edit whose
   `old_string` it cannot locate), is denied: passing it is the bypass.
 - Keep `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` and
-  `.antigravity-plugin/plugin.json` at the same `name` and `version`, and
-  bump that version past main's in every change that lands in what an
-  installed copy loads: today `.claude-plugin/`, `.codex-plugin/`,
-  `.antigravity-plugin/`, `hooks.json`, `hooks/`, `skills/`, `agents/`,
-  `claude-agents/` and the scripts a skill fires, and any path a client
-  starts loading.
-  Claude Code caches an installed copy of the whole tree under its
-  version and updates only when the version moves, so a change shipped
-  at an unchanged version never reaches a machine that already has it,
-  not even through a reinstall; Codex keys its cache by version too. A
-  change only to the tests, CI, the build, `README.md` or this file
-  changes no installed behaviour and keeps main's version. Two branches
-  bumping to the same number merge without a conflict, so check main's
-  version before merging.
+  `.antigravity-plugin/plugin.json` at the same `name` and `version`.
+  Pull requests never change `version`; only a deliberate release PR
+  bumps it (see "Releasing" below). Claude Code and Codex cache an
+  installed copy keyed by `version`, so installs track the `release`
+  branch (and Antigravity installs from a `v*` tag), never unreleased
+  `main`. Changes to what an installed copy loads — `.claude-plugin/`,
+  `.codex-plugin/`, `.antigravity-plugin/`, `hooks.json`, `hooks/`,
+  `skills/`, `agents/`, `claude-agents/` and `scripts/` — accumulate on
+  `main` until the next release.
 - Name no other repository, project or person in shipped files. Anything
   a project needs to say about itself belongs in that project's own
   `AGENTS.md`. The exception is devkit, whose pin and wrapper the build
@@ -113,8 +108,7 @@ that can break silently.
   and devkit's anchored-match and copy-paste gates (`devkit.toml`).
   CI runs `make lint` and `make test`; `make gate` and pre-push run
   `lint-repo test` only, so run `make lint` before pushing.
-  `make format` applies ruff, and a change it makes to `hooks/` needs
-  the version bump.
+  `make format` applies ruff.
 - `make hooks` once per clone: `pre-commit` runs `make lint-repo`,
   `pre-push` `make lint-repo test`.
 - `make gate` — runs the push gate (`lint-repo test`) and records a HEAD
@@ -128,3 +122,54 @@ that can break silently.
   change. Must pass with zero errors. Expected multi-tool warnings: root
   `AGENTS.md` and `hooks/hooks.json` (both are intentionally for other
   tools; Antigravity reads root `hooks.json` and `skills/`/`agents/`).
+
+## Releasing
+
+Only the maintainer cuts a release; agents never bump `version`, write
+release entries in `CHANGELOG.md`, tag releases or push `release`. Tags
+are never moved or reused; fix a broken release with a new patch release.
+Follow the snippet below rather than `make tag`: release tags are signed
+with a dedicated SSH release key (`~/.ssh/id_agent_kit`, overridable via
+`AGENT_KIT_RELEASE_KEY`), not the ambient git signing key.
+
+1. Confirm at least one installed-copy path changed since the last tag
+   (`git log <last-tag>..origin/main --stat`). Do not cut a release with
+   nothing shippable to list.
+2. Open a release pull request targeting `main` that:
+   - bumps `version` to `X.Y.Z` in `.claude-plugin/plugin.json`,
+     `.codex-plugin/plugin.json` and `.antigravity-plugin/plugin.json`
+     (`pyproject.toml` is test-environment metadata and is not bumped);
+   - adds a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md`
+     summarizing user-facing changes since the last release (no
+     `## [Unreleased]` section; ordinary PRs never edit `CHANGELOG.md`);
+   - passes `make lint`, `make gate`, `claude plugin validate .` and
+     `agy plugin validate .`.
+3. Squash-merge the release pull request to `main` with no other pull
+   request landing between it and tagging.
+4. From a clean checkout at the repository root, sign and push the
+   annotated tag `vX.Y.Z` and fast-forward the protected `release` branch
+   (needs git 2.35 or later, OpenSSH 8.1 or later, and the dedicated
+   release private key at `~/.ssh/id_agent_kit` or
+   `AGENT_KIT_RELEASE_KEY`):
+
+   ```sh
+   git switch -q main && git pull -q --ff-only origin main &&
+     { [ "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)" ] ||
+       { echo "main differs from origin's main" >&2; false; }; } &&
+     { [ -z "$(git status --porcelain --untracked-files=all --ignore-submodules=none)" ] ||
+       { echo "working tree is not clean" >&2; false; }; } &&
+   file=${AGENT_KIT_RELEASE_KEY:-$HOME/.ssh/id_agent_kit} &&
+     { [ -r "$file" ] ||
+       { echo "release key not readable: $file" >&2; false; }; } &&
+   tag=v$(python3 -c 'import json, sys; vs = {json.load(open(p))["version"].strip() for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".antigravity-plugin/plugin.json")}; assert len(vs) == 1, f"manifest versions differ: {vs}"; v = next(iter(vs)); print(v or sys.exit("plugin.json declares no version"))') &&
+     { ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null ||
+       { echo "tag $tag already exists" >&2; false; }; } &&
+     git -c gpg.format=ssh -c user.signingKey="$file" tag -a -s "$tag" -m "agent-kit $tag" &&
+     { git push origin "$tag" ||
+       { git tag -d "$tag" >/dev/null; echo "tag push failed; deleted local $tag" >&2; false; }; } &&
+     git push origin "${tag}^{commit}:refs/heads/release"
+   ```
+
+   If the repository carries a pinned public key in `allowed_signers`,
+   verify `ssh-keygen -y -f "$file"` against it before tagging, as devkit
+   does.

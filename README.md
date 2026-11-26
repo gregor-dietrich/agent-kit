@@ -70,40 +70,63 @@ the author ratifies.
 ## Installing
 
 The repository is its own marketplace (`.claude-plugin/marketplace.json`,
-plugin at the root). Claude Code:
+plugin at the root). Releases are published on the protected `release`
+branch and tagged `vX.Y.Z`; `main` carries unreleased work between
+releases, so installs track `release` (or a release tag) rather than
+`main`.
 
-```sh
-claude plugin marketplace add ssh://git@git.vptr.de:222/gregor/agent-kit.git
-claude plugin install agent-kit@agent-kit
+Claude Code — configure the marketplace per machine in
+`~/.claude/settings.json` with `"ref": "release"`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "agent-kit": {
+      "source": {
+        "source": "git",
+        "url": "ssh://git@git.vptr.de:222/gregor/agent-kit.git",
+        "ref": "release"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "agent-kit@agent-kit": true
+  }
+}
 ```
 
-or, per machine through settings, an `extraKnownMarketplaces` entry with
-`{"source": "git", "url": "<the URL above>"}` and
-`"enabledPlugins": {"agent-kit@agent-kit": true}`.
+Update with `claude plugin marketplace update agent-kit` (followed by
+`claude plugin update agent-kit@agent-kit` if auto-update is off). Avoid
+bare `claude plugin marketplace add <url>`: that subcommand accepts no
+`--ref` flag and tracks `main`, which caches unreleased commits under
+the previous release's version.
 
-Codex reads the same marketplace file and `hooks/hooks.json`:
+Codex reads the same marketplace file and `hooks/hooks.json`; pin it to
+`release`:
 
 ```sh
-codex plugin marketplace add ssh://git@git.vptr.de:222/gregor/agent-kit.git
+codex plugin marketplace add --ref release ssh://git@git.vptr.de:222/gregor/agent-kit.git
 codex plugin add agent-kit@agent-kit
 ```
 
-Codex holds plugin hooks back until they are trusted: open `/hooks` once
-after installing, and again after any update that changes a hook command —
-an untrusted hook is indistinguishable, from inside a session, from no
-guard at all. Codex plugins carry no agent types; a Codex session
-dispatches the five roles by spawning subagents (the delegation skill,
-"Pins by client"). That is separate from the opt-in bridges below, which
-provide cross-family reviews in Stage 1c.
+Refresh with `codex plugin marketplace upgrade agent-kit`. Codex holds
+plugin hooks back until they are trusted: open `/hooks` once after
+installing, and again after any update that changes a hook command — an
+untrusted hook is indistinguishable, from inside a session, from no guard
+at all. Codex plugins carry no agent types; a Codex session dispatches
+the five roles by spawning subagents (the delegation skill, "Pins by
+client"). That is separate from the opt-in bridges below, which provide
+cross-family reviews in Stage 1c.
 
 Antigravity CLI (`agy`) loads `.antigravity-plugin/plugin.json`, root
-`hooks.json`, `skills/` and `agents/` natively. Install from a clean
-export (a development checkout carries a `.devkit` symlink outside the
-tree, which `agy plugin install` refuses to copy):
+`hooks.json`, `skills/` and `agents/` natively. Install or update from a
+clean export of a release tag (a development checkout carries a `.devkit`
+symlink outside the tree, which `agy plugin install` refuses to copy):
 
 ```sh
+git fetch origin --tags
 tmp=$(mktemp -d)
-git archive HEAD | tar -x -C "$tmp"
+git archive vX.Y.Z | tar -x -C "$tmp"
 agy plugin install "$tmp"
 rm -rf "$tmp"
 ```
