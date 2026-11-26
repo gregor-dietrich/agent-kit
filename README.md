@@ -164,7 +164,9 @@ in, with one marker file that covers every project:
   Antigravity config unless `AGY_AGENT_ALLOW_REPO_CONFIG=1` is set, and
   verifies `model`, `permission_mode`, read-only `tools` and
   `result.status` (and reads token usage) from `agy`'s `stream-json`
-  `init` and `result` events. Residual boundary: `agy` has no
+  `init` and `result` events. `init` is checked as it arrives, and a
+  mismatch stops `agy` with exit 3; a CLI newer than the measured version
+  runs with a notice. Residual boundary: `agy` has no
   `--ignore-user-config`, so user-level settings and MCP config still
   apply. Needs `agy` 1.5.16 or later and `python3`. Opt in with:
 
