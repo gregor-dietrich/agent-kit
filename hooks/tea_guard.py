@@ -18,6 +18,17 @@ guard cannot read (an expansion, ``--description-file``, a comment with no
 body argument): a call it has read but cannot model is denied. The one
 admitted form is a line holding only ``Closes #N`` in a PR description.
 
+Accepted limits: the guard catches ordinary posting, not a determined
+bypass, and each rule added to its shell reading is one more place for it
+to disagree with the shell. Not seen: a ``tea`` call inside an inner shell
+(``bash -c '...'``), in backticks, as the condition of ``if``, ``while`` or
+``until``, or behind a wrapper the shared prefix list lacks (``timeout 30
+tea ...``); a command word built from a variable; brace expansion; a
+quoted redirect operator passed as an argument of its own; a command that
+does not tokenize at all; and text piped into a comment that also has a
+body argument. ``tea issues create|edit`` and commit messages are outside
+both rules.
+
 Behavior is pinned by tests/hooks/test_tea_guard.py — a crashed PreToolUse
 hook fails OPEN in the harness, so those tests are what notices a broken
 guard. Shared plumbing and the shell tokenizer live in hook_lib.py.
