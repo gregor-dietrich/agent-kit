@@ -120,12 +120,16 @@ def logical_lines(text: str) -> list[str]:
     command tokenizes whole. Outside single quotes a backslash escapes the
     next character, and a backslash-newline pair is a line continuation and
     is removed. A ``#`` at the start of a word begins a comment that runs to
-    the end of its line, so an apostrophe in one opens no quote. A quote
-    still open at the end falls back to the physical lines, so an unbalanced
-    command behaves as it always did.
+    the end of its line, so an apostrophe in one opens no quote. A heredoc
+    body is dropped, as :func:`strip_heredocs` drops it, but only where its
+    ``<<`` stands outside quotes: quoted, it is text (``"cout << x"``), and
+    reading it as a heredoc swallowed the rest of the command. A quote still
+    open at the end falls back to the heredoc-stripped physical lines, so an
+    unbalanced command behaves as it always did.
     """
     lines: list[str] = []
     cur: list[str] = []
+    delims: list[str] = []
     quote = ""
     i = 0
     while i < len(text):
@@ -145,14 +149,29 @@ def logical_lines(text: str) -> list[str]:
             cur.append(text[i:end])
             i = end
             continue
+        elif m := _HEREDOC_START.match(text, i):
+            delims.append(m[1].strip("\"'"))
+            cur.append(m[0])
+            i = m.end()
+            continue
         elif ch == "\n":
             lines.append("".join(cur))
             cur = []
             i += 1
+            for delim in delims:
+                while i < len(text):
+                    end = text.find("\n", i)
+                    end = len(text) if end < 0 else end
+                    body_line, i = text[i:end], end + 1
+                    if body_line.strip() == delim:
+                        break
+            delims = []
             continue
         cur.append(ch)
         i += 1
-    return text.split("\n") if quote else [*lines, "".join(cur)]
+    if quote:
+        return strip_heredocs(text).split("\n")
+    return [*lines, "".join(cur)]
 
 
 def tokenize_lines(
@@ -169,8 +188,10 @@ def tokenize_lines(
     standalone tokens. With *multiline*, lines are the logical lines of
     :func:`logical_lines`, so a quoted string spanning lines tokenizes.
     """
-    stripped = strip_heredocs(text)
-    for line in logical_lines(stripped) if multiline else stripped.split("\n"):
+    lines = (
+        logical_lines(text) if multiline else strip_heredocs(text).split("\n")
+    )
+    for line in lines:
         if not line.strip():
             continue
         try:

@@ -28,6 +28,7 @@ import re
 from hook_lib import (
     command_text,
     deny,
+    effective_tool,
     read_payload,
     simple_commands,
     tool_input,
@@ -206,9 +207,13 @@ def main() -> None:
 
     cmd = _FD.sub("", _HEREDOC_SUB.sub(lift, cmd))
     for name, args in simple_commands(cmd, multiline=True):
+        # `command tea ...`, `env X=1 tea ...`; then tea's own global flags
+        # (`tea --debug comment ...`), none of which takes a value.
+        name, args = effective_tool(name, _without_redirects(args))
+        while args and args[0].startswith("-"):
+            args = args[1:]
         if name != "tea" or not args:
             continue
-        args = _without_redirects(args)
         group, rest = args[0], args[1:]
         if (
             group in READ_SUBCOMMANDS

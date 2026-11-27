@@ -111,6 +111,18 @@ def test_multiline_apostrophes_in_comments_open_no_quote() -> None:
     assert [n for n, _ in _multiline(text)] == ["echo", "make", "echo"]
 
 
+def test_multiline_reads_a_quoted_heredoc_operator_as_text() -> None:
+    # `<<` inside quotes starts no heredoc; read as one, it swallowed the
+    # rest of the command.
+    text = 'echo "cout << x\nmore"\nmake test'
+    assert [n for n, _ in _multiline(text)] == ["echo", "make"]
+
+
+def test_multiline_still_drops_an_unquoted_heredoc_body() -> None:
+    text = "git commit -F - <<'EOF'\nit's `tea issues 1`\nEOF\nls"
+    assert [n for n, _ in _multiline(text)] == ["git", "ls"]
+
+
 def test_multiline_unbalanced_quote_falls_back_to_physical_lines() -> None:
     text = "echo 'unclosed\nmake test"
     assert [n for n, _ in _multiline(text)] == ["make"]

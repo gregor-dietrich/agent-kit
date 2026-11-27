@@ -118,6 +118,10 @@ _HEREDOC = "tea comment 5 \"$(cat <<'EOF'\n{body}\nEOF\n)\""
         'tea c 5 "fix: #3"',
         'tea comment 5 "closes owner/repo#3"',
         "tea comment 5 'first\nthen fixes #3'",
+        'tea comment 5 "cout << x\nthis fixes #3"',
+        "command tea comment 5 'fixes #3'",
+        "env X=1 tea comment 5 'fixes #3'",
+        "tea --debug comment 5 'fixes #3'",
         'tea comment 5 "Closes #3"',
         'tea pulls merge 5 -m "Closes #3"',
         'tea pulls create -t "fixes #3"',
@@ -159,6 +163,11 @@ def test_a_keyword_is_denied_through_the_antigravity_payload() -> None:
 
 def test_a_redirect_does_not_hide_an_index() -> None:
     assert _denied("tea issues 2 > out.txt")
+
+
+def test_a_wrapper_does_not_hide_a_read() -> None:
+    assert _denied("command tea issues 5")
+    assert not _denied("command -v tea")
 
 
 def test_apostrophes_in_comments_do_not_hide_a_read() -> None:
