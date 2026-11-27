@@ -24,7 +24,7 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "scripts" / "agy-agent.sh"
-_FIXTURE = Path(__file__).parent / "fixtures" / "agy_stream_json_1.5.16.jsonl"
+_FIXTURE = Path(__file__).parent / "fixtures" / "agy_stream_json_1.5.18.jsonl"
 _TOOLS = (
     "awk",
     "bash",
@@ -43,11 +43,16 @@ _DEFAULT = object()
 _REDISPATCH = "Discard the result and re-dispatch."
 _NO_REDISPATCH = "Do not re-dispatch"
 _STOPPED = "Sent agy SIGTERM at its init event."
+_STOPPED_STEP = "Sent agy SIGTERM at a step outside the read-only set."
+_MAY_HAVE_RUN = "The call may already have run"
+# What init.tools looks like on 1.5.18: the CLI's registry, writes included.
+_REGISTRY = ["ask_permission", "run_command", "write_file", "search_web"]
 
 # `linger` holds a sleep length: the fake then stays up that long and stops on
 # TERM, taking its sleep with it; its trap and `started` come before stdout,
 # so a TERM that answers stdout finds both. `split` writes stdout in two
-# halves.
+# halves. `gap` writes the first stdout line, waits the length it holds, then
+# writes the rest.
 _FAKE_AGY = """#!@BASH@
 d="$FAKE_AGY_DIR"
 printf '%s\\n' "$*" >> "$d/calls"
@@ -66,6 +71,11 @@ if [ -f "$d/split" ]; then
     printf '%s' "${out:0:half}"
     sleep 0.5
     printf '%s\\n' "${out:half}"
+elif [ -f "$d/gap" ]; then
+    {
+        IFS= read -r first; printf '%s\\n' "$first"
+        sleep "$(cat "$d/gap")"; cat
+    } < "$d/stdout"
 else
     cat "$d/stdout"
 fi
@@ -79,6 +89,23 @@ exit "$(cat "$d/status")"
 """
 
 
+def _step(
+    step_type: str,
+    tool_name: str | None = None,
+    state: str = "DONE",
+    index: int = 3,
+) -> dict[str, object]:
+    step: dict[str, object] = {
+        "conversation_id": "0000",
+        "step_index": index,
+        "state": state,
+        "step_type": step_type,
+    }
+    if tool_name is not None:
+        step["tool_name"] = tool_name
+    return step
+
+
 def _stream(
     model: str | None = _MODEL,
     permission_mode: str | None = "request-review",
@@ -86,6 +113,7 @@ def _stream(
     status: str = "SUCCESS",
     response: str | None = _MESSAGE,
     tokens: int | None = 12345,
+    steps: tuple[object, ...] = (),
     include_init: bool = True,
     include_result: bool = True,
 ) -> str:
@@ -93,7 +121,7 @@ def _stream(
     if include_init:
         init_body: dict[str, object] = {"cwd": "/repo"}
         if tools is _DEFAULT:
-            init_body["tools"] = ["view_file", "grep_search"]
+            init_body["tools"] = _REGISTRY
         elif tools is not None:
             init_body["tools"] = tools
         if permission_mode is not None:
@@ -109,6 +137,10 @@ def _stream(
                 }
             )
         )
+    lines.extend(
+        json.dumps({"event": "step_update", "step_update": step})
+        for step in steps
+    )
     if include_result:
         res_body: dict[str, object] = {
             "conversation_id": "0000",
@@ -200,7 +232,7 @@ def bridge(tmp_path: Path) -> Bridge:
 
     fake = tmp_path / "fake"
     fake.mkdir()
-    (fake / "version").write_text("1.5.16\n", encoding="utf-8")
+    (fake / "version").write_text("1.5.18\n", encoding="utf-8")
     (fake / "stdout").write_text(_stream(), encoding="utf-8")
     (fake / "status").write_text("0\n", encoding="utf-8")
 
@@ -253,7 +285,7 @@ def test_verified_run_prints_response_and_tokens(bridge: Bridge) -> None:
     assert res.returncode == 0, res.stderr
     assert res.stdout == _MESSAGE
     assert "tokens used (normalised): 12345" in res.stderr
-    assert "Pin verified" in res.stderr
+    assert "Pin and read-only steps verified" in res.stderr
     argv = bridge.argv()
     pairs = list(pairwise(argv))
     assert ("--input-format", "stream-json") in pairs
@@ -277,6 +309,7 @@ def test_verified_run_prints_response_and_tokens(bridge: Bridge) -> None:
     content = str(ev["message"]["content"])  # type: ignore[index]
     assert str(bridge.kit / "agents" / "code-reviewer.md") in content
     assert _PROMPT in content
+    assert "read_file is the only tool this run accepts" in content
     assert not any(bridge.tmp_dir.iterdir())
 
 
@@ -290,7 +323,7 @@ def test_real_stream_json_fixture_verifies(bridge: Bridge) -> None:
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert res.returncode == 0, res.stderr
     assert res.stdout == "No verified findings.\n"
-    assert "tokens used (normalised): 11574" in res.stderr
+    assert "tokens used (normalised): 258523" in res.stderr
 
 
 def test_shipped_code_reviewer_pin_verifies(bridge: Bridge) -> None:
@@ -460,11 +493,12 @@ def test_quoted_or_commented_agy_model_refused(
     assert bridge.calls() == []
 
 
-def test_below_version_floor_is_refused(bridge: Bridge) -> None:
-    (bridge.fake / "version").write_text("1.5.15\n", encoding="utf-8")
+@pytest.mark.parametrize("version", ["1.5.15", "1.5.17"])
+def test_below_version_floor_is_refused(bridge: Bridge, version: str) -> None:
+    (bridge.fake / "version").write_text(f"{version}\n", encoding="utf-8")
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert res.returncode == 2
-    assert "agy >= 1.5.16" in res.stderr
+    assert "agy >= 1.5.18" in res.stderr
     assert bridge.calls() == ["--version"]
 
 
@@ -480,16 +514,25 @@ def test_model_mismatch_exits_3_and_discards_response(bridge: Bridge) -> None:
     assert _NO_REDISPATCH not in res.stderr
 
 
-def test_model_mismatch_stops_agy_early_and_may_be_redispatched(
-    bridge: Bridge,
-) -> None:
-    (bridge.fake / "stdout").write_text(
-        _stream(model="gemini-wrong", include_result=False), encoding="utf-8"
-    )
+def _run_lingering(
+    bridge: Bridge, stream: str
+) -> subprocess.CompletedProcess[str]:
+    """Run with a 30-second linger: returning well inside it proves agy was
+    stopped."""
+    (bridge.fake / "stdout").write_text(stream, encoding="utf-8")
     (bridge.fake / "linger").write_text("30\n", encoding="utf-8")
     start = time.monotonic()
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert time.monotonic() - start < 10
+    return res
+
+
+def test_model_mismatch_stops_agy_early_and_may_be_redispatched(
+    bridge: Bridge,
+) -> None:
+    res = _run_lingering(
+        bridge, _stream(model="gemini-wrong", include_result=False)
+    )
     assert res.returncode == 3, res.stderr
     assert res.stdout == ""
     assert "pin mismatch on model" in res.stderr
@@ -538,28 +581,12 @@ def test_unexpected_permission_mode_exits_3(
     assert _REDISPATCH not in res.stderr
 
 
-@pytest.mark.parametrize(
-    "bad_tools",
-    [
-        None,
-        [],
-        ["run_command"],
-        ["write_file"],
-        ["view_file", "search_web"],
-    ],
-)
-def test_unexpected_init_tools_exits_3(
-    bridge: Bridge, bad_tools: list[str] | None
-) -> None:
-    (bridge.fake / "stdout").write_text(
-        _stream(tools=bad_tools), encoding="utf-8"
-    )
+@pytest.mark.parametrize("tools", [None, [], "run_command", {"a": 1}])
+def test_init_tools_is_not_read(bridge: Bridge, tools: object) -> None:
+    (bridge.fake / "stdout").write_text(_stream(tools=tools), encoding="utf-8")
     res = bridge.run("code-reviewer", str(bridge.prompt))
-    assert res.returncode == 3
-    assert res.stdout == ""
-    assert "unexpected tools" in res.stderr
-    assert _NO_REDISPATCH in res.stderr
-    assert _REDISPATCH not in res.stderr
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == _MESSAGE
 
 
 def test_missing_result_event_exits_3(bridge: Bridge) -> None:
@@ -866,11 +893,39 @@ _BAD_INITS = [
         _stream(permission_mode="auto", include_result=False),
         "unexpected permission_mode 'auto'",
     ),
-    (
-        _stream(tools=["run_command"], include_result=False),
-        "unexpected tools in init event",
-    ),
 ]
+_BAD_STEPS = [
+    (
+        _step("tool", "search_web"),
+        "step_type 'tool', tool_name 'search_web', step_index 3",
+    ),
+    (
+        _step("tool", "write_file", "ERROR"),
+        "step_type 'tool', tool_name 'write_file', step_index 3",
+    ),
+    (
+        _step("subagent", "invoke_subagent", "ACTIVE"),
+        "step_type 'subagent', tool_name 'invoke_subagent', step_index 3",
+    ),
+    (_step("tool"), "step_type 'tool', tool_name None, step_index 3"),
+    (_step("mystery"), "step_type 'mystery', tool_name None, step_index 3"),
+    (
+        _step("agent_response", "read_file"),
+        "step_type 'agent_response', tool_name 'read_file', step_index 3",
+    ),
+    # JSON values no set could hold: the check must reject, not crash.
+    (
+        {"step_type": ["tool"], "tool_name": "read_file"},
+        "step_type ['tool'], tool_name 'read_file', step_index None",
+    ),
+    (
+        {"step_type": "tool", "tool_name": ["read_file"], "step_index": 3},
+        "step_type 'tool', tool_name ['read_file'], step_index 3",
+    ),
+    ("oops", "unreadable step_update event"),
+]
+_BAD_STEP = _BAD_STEPS[0]
+_BAD_STEP_MSG = f"step outside the read-only set: {_BAD_STEP[1]}"
 
 
 def _assert_early_stop(
@@ -881,7 +936,7 @@ def _assert_early_stop(
     assert f"ERROR: {expected}" in res.stderr
     assert _STOPPED in res.stderr
     assert _NO_REDISPATCH in res.stderr
-    assert "installed agy (1.5.16)" in res.stderr
+    assert "installed agy (1.5.18)" in res.stderr
     assert _REDISPATCH not in res.stderr
     assert "tokens unavailable; never estimate." in res.stderr
     assert (bridge.fake / "started").exists()
@@ -919,14 +974,14 @@ def test_init_mismatch_early_stop_names_transcript(
 
 def test_split_init_line_still_stops_agy(bridge: Bridge) -> None:
     (bridge.fake / "stdout").write_text(
-        _BAD_INITS[1][0].rstrip("\n"), encoding="utf-8"
+        _BAD_INITS[0][0].rstrip("\n"), encoding="utf-8"
     )
     (bridge.fake / "split").touch()
     (bridge.fake / "linger").write_text("30\n", encoding="utf-8")
     start = time.monotonic()
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert time.monotonic() - start < 10
-    _assert_early_stop(bridge, res, _BAD_INITS[1][1])
+    _assert_early_stop(bridge, res, _BAD_INITS[0][1])
 
 
 @pytest.mark.parametrize("bad_stream, expected", _BAD_INITS)
@@ -939,13 +994,13 @@ def test_unterminated_bad_init_is_caught_by_final_verification(
     assert res.returncode == 3, res.stderr
     assert f"ERROR: {expected}" in res.stderr
     assert _NO_REDISPATCH in res.stderr
-    assert "Stopped agy" not in res.stderr
+    assert "Sent agy SIGTERM" not in res.stderr
     assert _REDISPATCH not in res.stderr
 
 
 def test_bad_init_outranks_agys_own_status(bridge: Bridge) -> None:
     # No newline: the watcher never sees the line, so agy exits 7 by itself.
-    (bridge.fake / "stdout").write_text(_BAD_INITS[1][0].rstrip("\n"), "utf-8")
+    (bridge.fake / "stdout").write_text(_BAD_INITS[0][0].rstrip("\n"), "utf-8")
     (bridge.fake / "status").write_text("7\n", encoding="utf-8")
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert res.returncode == 3, res.stderr
@@ -958,7 +1013,7 @@ def test_a_stopped_run_exits_3_even_when_verify_names_another_fault(
 ) -> None:
     # Two inits, the first one bad: the watcher stops agy, verify reports
     # the count. Without the watcher's status this exited with agy's 143.
-    bad = _BAD_INITS[1][0]
+    bad = _BAD_INITS[0][0]
     (bridge.fake / "stdout").write_text(bad + bad, encoding="utf-8")
     (bridge.fake / "linger").write_text("30\n", encoding="utf-8")
     res = bridge.run("code-reviewer", str(bridge.prompt))
@@ -966,6 +1021,84 @@ def test_a_stopped_run_exits_3_even_when_verify_names_another_fault(
     assert "init event count" in res.stderr
     assert _STOPPED in res.stderr
     assert _REDISPATCH in res.stderr
+
+
+def test_read_file_steps_in_every_state_verify(bridge: Bridge) -> None:
+    steps = (
+        _step("user_input", index=0),
+        _step("system_message", index=1),
+        _step("agent_response", state="ACTIVE", index=2),
+        _step("tool", "read_file", "ACTIVE"),
+        _step("tool", "read_file", "DONE"),
+        _step("tool", "read_file", "ERROR", index=4),
+    )
+    (bridge.fake / "stdout").write_text(_stream(steps=steps), encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == _MESSAGE
+
+
+def _assert_step_rejected(
+    res: subprocess.CompletedProcess[str], expected: str
+) -> None:
+    assert res.returncode == 3, res.stderr
+    assert res.stdout == ""
+    assert f"ERROR: {expected}" in res.stderr
+    assert _MAY_HAVE_RUN in res.stderr
+    assert _REDISPATCH in res.stderr
+    assert _NO_REDISPATCH not in res.stderr
+
+
+@pytest.mark.parametrize("step, detail", _BAD_STEPS)
+def test_step_outside_the_read_only_set_exits_3(
+    bridge: Bridge, step: object, detail: str
+) -> None:
+    (bridge.fake / "stdout").write_text(_stream(steps=(step,)), "utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    expected = (
+        detail
+        if step == "oops"
+        else f"step outside the read-only set: {detail}"
+    )
+    _assert_step_rejected(res, expected)
+
+
+def _run_bad_step_lingering(bridge: Bridge) -> None:
+    """Run a stream ending in a bad step and a 30-second linger: a return
+    well inside it proves agy was stopped, at the step."""
+    stream = _stream(steps=(_BAD_STEP[0],), include_result=False)
+    res = _run_lingering(bridge, stream)
+    _assert_step_rejected(res, _BAD_STEP_MSG)
+    assert _STOPPED_STEP in res.stderr
+    assert _STOPPED not in res.stderr
+    assert "tokens unavailable; never estimate." in res.stderr
+    assert (bridge.fake / "started").exists()
+
+
+@pytest.mark.parametrize("bounded", [True, False])
+def test_bad_step_stops_agy_early(bridge: Bridge, bounded: bool) -> None:
+    _set_bounded(bridge, bounded)
+    _run_bad_step_lingering(bridge)
+
+
+def test_watcher_keeps_reading_after_init(bridge: Bridge) -> None:
+    # The bad step is written at least half a second after the init line.
+    (bridge.fake / "gap").write_text("0.6\n", encoding="utf-8")
+    _run_bad_step_lingering(bridge)
+
+
+@pytest.mark.parametrize("agy_status", ["0", "7"])
+def test_unterminated_bad_step_is_caught_by_final_verification(
+    bridge: Bridge, agy_status: str
+) -> None:
+    # No newline: the watcher can never parse the line, `verify` does.
+    stream = _stream(steps=(_BAD_STEP[0],), include_result=False)
+    (bridge.fake / "stdout").write_text(stream.rstrip("\n"), "utf-8")
+    (bridge.fake / "status").write_text(f"{agy_status}\n", encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    _assert_step_rejected(res, _BAD_STEP_MSG)
+    assert "Sent agy SIGTERM" not in res.stderr
+    assert "agy exited 7" not in res.stderr
 
 
 def test_an_error_value_holding_an_equals_sign_is_printed_whole(
@@ -987,17 +1120,17 @@ def test_valid_init_is_not_stopped(bridge: Bridge) -> None:
     assert (bridge.fake / "survived").exists()
     assert "no result event" in res.stderr
     assert _REDISPATCH in res.stderr
-    assert "Stopped agy" not in res.stderr
+    assert "Sent agy SIGTERM" not in res.stderr
 
 
-@pytest.mark.parametrize("version", ["1.5.17", "1.6.0", "2.0.0"])
+@pytest.mark.parametrize("version", ["1.5.19", "1.6.0", "2.0.0"])
 def test_newer_agy_runs_with_notice(bridge: Bridge, version: str) -> None:
     (bridge.fake / "version").write_text(f"{version}\n", encoding="utf-8")
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert res.returncode == 0, res.stderr
     assert res.stdout == _MESSAGE
     assert (
-        f"NOTE: agy {version} is newer than 1.5.16, the newest version this\n"
+        f"NOTE: agy {version} is newer than 1.5.18, the newest version this\n"
         "  bridge was measured on; the run may fail verification.\n"
     ) in res.stderr
     assert res.stderr.index("NOTE:") < res.stderr.index("Dispatching")
@@ -1095,7 +1228,7 @@ def test_verified_run_leaves_no_watcher(bridge: Bridge) -> None:
 
 @needs_proc
 def test_early_stop_leaves_no_watcher(bridge: Bridge) -> None:
-    (bridge.fake / "stdout").write_text(_BAD_INITS[1][0], encoding="utf-8")
+    (bridge.fake / "stdout").write_text(_BAD_INITS[0][0], encoding="utf-8")
     (bridge.fake / "linger").write_text("30\n", encoding="utf-8")
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert res.returncode == 3, res.stderr

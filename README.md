@@ -44,7 +44,7 @@ setup that grows the way the original did.**
 | `skills/push-gate` | Which gate a push owes, and how it runs | Any repository; narrower gates come from the project's rules |
 | `skills/ai-review` | Multi-agent review with pinned agents, stance-split verification and no finding cap | Any repository; risk paths can be named in the project's `AGENTS.md` |
 | `agents/*`, `claude-agents/*` | scout, code-reviewer, software-architect, backend-developer, frontend-developer | Antigravity loads `agents/*` natively (`model:` tiers), Claude Code loads `claude-agents/*` via `.claude-plugin/plugin.json`, Codex spawns `agents/*` on `codex-model` and `codex-effort`; each reads the project's own docs before acting |
-| `scripts/agy-agent.sh` | Pinned read-only Antigravity dispatch for ai-review Stage 1c | Opt-in per user via `~/.config/agent-kit/agy-bridge`; needs `agy` 1.5.16 or later |
+| `scripts/agy-agent.sh` | Pinned read-only Antigravity dispatch for ai-review Stage 1c | Opt-in per user via `~/.config/agent-kit/agy-bridge`; needs `agy` 1.5.18 or later |
 | `scripts/codex-agent.sh` | Pinned Codex dispatch for ai-review Stage 1c | Opt-in per user via `~/.config/agent-kit/codex-bridge`; needs codex-cli 0.160.0 or later |
 
 ### The one that matters most
@@ -159,16 +159,19 @@ in, with one marker file that covers every project:
 
 - **Antigravity bridge (`scripts/agy-agent.sh`)** — cross-family from
   Claude Code or Codex. Pins `agy-model` from `agents/code-reviewer.md`,
-  runs `--sandbox` with `--settings` locking permissions read-only (no
-  writes, shell, network or MCP), refuses repositories with project-level
-  Antigravity config unless `AGY_AGENT_ALLOW_REPO_CONFIG=1` is set, and
-  verifies `model`, `permission_mode`, read-only `tools` and
-  `result.status` (and reads token usage) from `agy`'s `stream-json`
-  `init` and `result` events. `init` is checked as it arrives, and a
-  mismatch stops `agy` and the bridge exits 3; a CLI newer than the
+  runs `--sandbox` with `--settings` denying writes and shell commands,
+  refuses repositories with project-level Antigravity config unless
+  `AGY_AGENT_ALLOW_REPO_CONFIG=1` is set, and verifies `model`,
+  `permission_mode` and `result.status` (and reads token usage) from
+  `agy`'s `stream-json` events. `init` and every step are checked as they
+  arrive: the bridge stops `agy` at the first step that is not a
+  `read_file` call and exits 3, and a mismatched `init` does the same. Web
+  search and subagent tools cannot be denied by settings on 1.5.18, so
+  the check detects such a call when it starts and rejects the run, and
+  one web search query may leave the machine first. A CLI newer than the
   measured version runs with a notice. Residual boundary: `agy` has no
   `--ignore-user-config`, so user-level settings and MCP config still
-  apply. Needs `agy` 1.5.16 or later and `python3`. Opt in with:
+  apply. Needs `agy` 1.5.18 or later and `python3`. Opt in with:
 
   ```sh
   mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/agent-kit"

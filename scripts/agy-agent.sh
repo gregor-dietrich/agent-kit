@@ -15,20 +15,25 @@
 #
 # Verification requires exactly one `init` and one `result` event: `init.model`
 # must equal the pin, `init.permission_mode` must equal `request-review`,
-# `init.tools` must be a non-empty list drawn strictly from read-only tools
-# (`find_by_name`, `grep_search`, `list_dir`, `view_file`, `read_file`), and
-# `result` must report `status: "SUCCESS"` and a non-empty `response`. A run
-# violating any check exits 3 rather than handing back an unverified answer.
-# The `init` content is checked as it arrives, by a watcher beside `agy`: a
-# mismatch gets `agy` a SIGTERM before it spends more. The checks always run
-# again over the whole stream once `agy` has exited, and a run the watcher
-# stopped exits 3 whatever they find.
+# every `step_update` must be a plain step (`user_input`, `system_message`,
+# `agent_response`) or a `read_file` tool step, and `result` must report
+# `status: "SUCCESS"` and a non-empty `response`. A run violating any check
+# exits 3 rather than handing back an unverified answer. `init.tools` is the
+# CLI's whole registry on 1.5.18, whatever the settings say, and is not read.
+# The `init` content and every step are checked as they arrive, by a watcher
+# beside `agy`: a mismatch gets `agy` a SIGTERM before it spends more. The
+# checks always run again over the whole stream once `agy` has exited, and a
+# run the watcher stopped exits 3 whatever they find. The accepted limit: the
+# settings deny writes and shell commands, but web search and subagent tools
+# cannot be denied by settings on 1.5.18, so such a call is detected at its
+# `ACTIVE` line and the run rejected, after the call may have started. An
+# event the bridge does not know is ignored.
 #
 # Before dispatching, this wrapper scans the target repository for repo-local
 # executable Antigravity configs under `.agents`, `.agent`, `_agents`, `_agent`
 # (`hooks.json`, `mcp_config.json`, `plugins.json`, `plugins/`) and refuses
 # (exit 2) unless `AGY_AGENT_ALLOW_REPO_CONFIG=1` is set after reviewing them.
-# Residual limitation: `agy 1.5.16` has no `--ignore-user-config` flag, so
+# Residual limitation: `agy 1.5.18` has no `--ignore-user-config` flag, so
 # user-level Antigravity settings remain active.
 #
 # The user opts in, with one file that covers every project, by creating
@@ -38,9 +43,9 @@
 # to send the review prompt, and whatever `agy` chooses to read, to a second
 # vendor. It lives outside every checkout, so no branch can grant it.
 #
-# The stream-json `init`, `result` and `usage` shapes parsed below were
-# measured on the Antigravity CLI version named by MEASURED_VERSION below;
-# MIN_VERSION is the floor.
+# The stream-json `init`, `step_update`, `result` and `usage` shapes parsed
+# below were measured on the Antigravity CLI version named by MEASURED_VERSION
+# below; MIN_VERSION is the floor.
 #
 # Usage:
 #   agy-agent.sh <role> <prompt-file> [<transcript-file>]
@@ -59,11 +64,13 @@
 #   2    usage error, failed precondition, user not opted in, repo-local
 #        configs refused, or a pin key missing/malformed; `agy` did not run
 #   3    the pin could not be verified (`init` absent, duplicated or
-#        mismatched), permissions or tools were unexpected, or `agy` returned
-#        no valid answer: discard. A mismatched `init` content, and a run
-#        the watcher stopped, take precedence over `agy`'s own status. A
-#        permission or tools mismatch recurs until the bridge or the CLI
-#        changes, so do not re-dispatch it; a model mismatch may not.
+#        mismatched), permissions were unexpected, a step was outside the
+#        read-only set, or `agy` returned no valid answer: discard. A
+#        mismatched `init` content, an out-of-set step, and a run the
+#        watcher stopped, take precedence over `agy`'s own status. A
+#        permission mismatch recurs until the bridge or the CLI changes, so
+#        do not re-dispatch it; a model mismatch or an out-of-set step may
+#        not.
 #   124  the wall-clock bound stopped the run; 137 it had to be killed
 #   128+n  this wrapper got signal n (HUP, INT, TERM) and stopped `agy`
 #   else `agy`'s own status, when `agy` itself failed
@@ -88,9 +95,9 @@ else
 	CONFIG_HOME="${HOME:-}/.config"
 fi
 OPT_IN="$CONFIG_HOME/agent-kit/agy-bridge"
-MIN_VERSION='1.5.16'
+MIN_VERSION='1.5.18'
 # The newest version the stream-json shapes were measured on.
-MEASURED_VERSION='1.5.16'
+MEASURED_VERSION='1.5.18'
 SETTINGS='{"permissions":{"allow":["read_file(*)"],"deny":["write_file(*)","command(*)","mcp(*)","read_url(*)","execute_url(*)","download_url(*)"]}}'
 
 # One ERROR line, then any further arguments as indented continuations.
@@ -196,9 +203,9 @@ MODEL="$(pin agy-model)"
 
 PREAMBLE="Your role instructions are in $ROLE_FILE; read it in full. \
 Its model: and tools: frontmatter is replaced by this run's configuration. \
-You run read-only with no shell, no writes, no network fetches and no MCP \
-tools; read files directly. Do not delegate, commit, push or mutate tracker \
-state."
+You run read-only: read_file is the only tool this run accepts. Any other \
+tool call (shell, write, web search, URL fetch, MCP, subagent) ends the run \
+and discards your answer. Do not commit, push or mutate tracker state."
 
 command -v agy > /dev/null 2>&1 ||
 	die 'agy is not installed or not on PATH.'
@@ -206,7 +213,8 @@ command -v python3 > /dev/null 2>&1 ||
 	die 'python3 is not installed or not on PATH.'
 
 # A floor: an older agy CLI is unmeasured (see the header), so its pin and
-# stream-json contract cannot be proven. A newer one than MEASURED_VERSION
+# stream-json contract cannot be proven, and 1.5.18 is the first whose
+# step events the check reads. A newer one than MEASURED_VERSION
 # runs, with a notice.
 INSTALLED_VERSION="$(agy --version 2> /dev/null | awk 'NF { print; exit }' || true)"
 # Anything after X.Y.Z is ignored, by the floor and the notice alike.
@@ -284,10 +292,10 @@ with open(out_path, "w", encoding="utf-8") as out:
 ' "$PREAMBLE" "$PROMPT_FILE" "$INPUT_JSON" ||
 	die "failed to encode prompt file: $PROMPT_FILE"
 
-# One program for both uses, so the init checks exist once: `watch` stops agy
-# at a bad init event, `verify` checks the whole finished stream. It is kept
-# in a variable and run with `python3 -I -c`, so nothing the wrapper executes
-# is ever written under WORKDIR.
+# One program for both uses, so the init and step checks exist once: `watch`
+# stops agy at a bad init event or step, `verify` checks the whole finished
+# stream. It is kept in a variable and run with `python3 -I -c`, so nothing
+# the wrapper executes is ever written under WORKDIR.
 IFS= read -r -d '' CHECK_SRC << 'PY' || true
 import json
 import os
@@ -295,13 +303,9 @@ import signal
 import sys
 import time
 
-ALLOWED_TOOLS = {
-    "find_by_name",
-    "grep_search",
-    "list_dir",
-    "view_file",
-    "read_file",
-}
+# Tuples: `in` then compares, and never raises on an unhashable JSON value.
+ALLOWED_TOOLS = ("read_file",)
+PLAIN_STEPS = ("user_input", "system_message", "agent_response")
 
 
 def parse_event(line):
@@ -328,14 +332,23 @@ def init_error(init, expected_model):
             f"unexpected permission_mode {perm_mode!r}; "
             "expected 'request-review'",
         )
-    tools = init.get("tools")
-    if (
-        not isinstance(tools, list)
-        or not tools
-        or not all(isinstance(t, str) and t in ALLOWED_TOOLS for t in tools)
-    ):
-        return "init", f"unexpected tools in init event: {tools!r}"
     return None
+
+
+def step_error(step):
+    """A message for a step outside the read-only set, None when it is fine."""
+    if not isinstance(step, dict):
+        return "unreadable step_update event"
+    step_type = step.get("step_type")
+    tool_name = step.get("tool_name")
+    if (step_type in PLAIN_STEPS and tool_name is None) or (
+        step_type == "tool" and tool_name in ALLOWED_TOOLS
+    ):
+        return None
+    return (
+        f"step outside the read-only set: step_type {step_type!r}, "
+        f"tool_name {tool_name!r}, step_index {step.get('step_index')!r}"
+    )
 
 
 def pid_alive(pid):
@@ -351,41 +364,51 @@ def pid_alive(pid):
 
 
 def watch(stream_path, expected_model, pid):
-    """Exit 3 after TERMing pid on a bad first init, else 0 once pid is gone.
+    """TERM pid and exit 3 at a bad first init, 4 at a bad step.
 
-    Lines end at a newline only; `verify` also splits at a bare carriage
-    return, so a stream using one is judged by `verify` alone. The watch
-    also ends when the wrapper is gone: a signalled wrapper exits without
-    reaping agy, and a pid nobody reaps would look alive forever.
+    Otherwise return once pid is gone. Lines end at a newline only;
+    `verify` also splits at a bare carriage return, so a stream using
+    one is judged by `verify` alone. The watch also ends when the
+    wrapper is gone: a signalled wrapper exits without reaping agy, and
+    a pid nobody reaps would look alive forever.
     """
     pos = 0
     buf = b""
     seen = False
     parent = os.getppid()
     while os.getppid() == parent and pid_alive(pid):
-        if not seen:
-            try:
-                with open(stream_path, "rb") as fh:
-                    fh.seek(pos)
-                    chunk = fh.read()
-            except OSError:
-                chunk = b""
-            pos += len(chunk)
-            *lines, buf = (buf + chunk).split(b"\n")
-            for line in lines:
-                obj = parse_event(line.decode("utf-8", errors="replace"))
-                if obj is None or obj.get("event") != "init":
-                    continue
+        try:
+            with open(stream_path, "rb") as fh:
+                fh.seek(pos)
+                chunk = fh.read()
+        except OSError:
+            chunk = b""
+        pos += len(chunk)
+        *lines, buf = (buf + chunk).split(b"\n")
+        for line in lines:
+            obj = parse_event(line.decode("utf-8", errors="replace"))
+            if obj is None:
+                continue
+            ev = obj.get("event")
+            if ev == "init" and not seen:
                 seen = True
                 init = obj.get("init")
-                if isinstance(init, dict) and init_error(init, expected_model):
-                    try:
-                        os.kill(pid, signal.SIGTERM)
-                    except ProcessLookupError:
-                        return
-                    sys.exit(3)
-                break
-        time.sleep(0.5 if seen else 0.1)
+                bad = isinstance(init, dict) and init_error(
+                    init, expected_model
+                )
+                code = 3
+            elif ev == "step_update":
+                bad = step_error(obj.get("step_update"))
+                code = 4
+            else:
+                continue
+            if bad:
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    return
+                sys.exit(code)
+        time.sleep(0.1)
 
 
 def verify(stream_path, expected_model, msg_path):
@@ -394,6 +417,7 @@ def verify(stream_path, expected_model, msg_path):
     result_obj = None
     result_count = 0
     bad_result_status = None
+    bad_step = None
     with open(stream_path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             obj = parse_event(line)
@@ -404,6 +428,8 @@ def verify(stream_path, expected_model, msg_path):
                 init_count += 1
                 if init_obj is None and isinstance(obj.get("init"), dict):
                     init_obj = obj["init"]
+            elif ev == "step_update" and bad_step is None:
+                bad_step = step_error(obj.get("step_update"))
             elif ev == "result":
                 result_count += 1
                 res = obj.get("result")
@@ -436,6 +462,11 @@ def verify(stream_path, expected_model, msg_path):
     if mismatch is not None:
         print(f"ERR={mismatch[1]}")
         print(f"KIND={mismatch[0]}")
+        sys.exit(3)
+
+    if bad_step is not None:
+        print(f"ERR={bad_step}")
+        print("KIND=step")
         sys.exit(3)
 
     if result_count == 0 or result_obj is None:
@@ -500,9 +531,10 @@ WATCH_STATUS=0
 	< "$INPUT_JSON" > "$STREAM_FILE" 2> "$STDERR_FILE" &
 AGY_PID=$!
 # Under `timeout`, AGY_PID is timeout's, which forwards TERM to agy. The
-# watcher exits 3 after TERMing agy, and 0 once agy is gone; any other status
-# is a crash, which changes nothing: the verification below decides. It is
-# never signalled: it ends within a poll of agy, or of this wrapper.
+# watcher exits 3 after TERMing agy at a bad init, 4 at a bad step, and 0 once
+# agy is gone; any other status is a crash, which changes nothing: the
+# verification below decides. It is never signalled: it ends within a poll
+# of agy, or of this wrapper.
 python3 -I -c "$CHECK_SRC" watch "$STREAM_FILE" "$MODEL" "$AGY_PID" \
 	> /dev/null 2>&1 &
 WATCH_PID=$!
@@ -544,19 +576,29 @@ else
 	printf 'tokens unavailable; never estimate.\n' >&2
 fi
 
-# An init content mismatch outranks agy's own status (a TERMed agy exits
-# non-zero) and does not depend on whether the watcher saw it first.
+# An init content mismatch or an out-of-set step outranks agy's own status (a
+# TERMed agy exits non-zero) and does not depend on whether the watcher saw it
+# first.
 KIND="$(field KIND)"
-if [[ "$KIND" == init || "$KIND" == pin || "$WATCH_STATUS" -eq 3 ]]; then
+if [[ "$KIND" == init || "$KIND" == pin || "$KIND" == step ||
+	"$WATCH_STATUS" -eq 3 || "$WATCH_STATUS" -eq 4 ]]; then
 	DETAILS=()
 	[[ "$WATCH_STATUS" -ne 3 ]] ||
 		DETAILS+=('Sent agy SIGTERM at its init event.')
+	[[ "$WATCH_STATUS" -ne 4 ]] ||
+		DETAILS+=('Sent agy SIGTERM at a step outside the read-only set.')
 	if [[ "$KIND" == init ]]; then
 		# Deterministic for the installed agy: say so.
 		DETAILS+=(
 			"The installed agy ($INSTALLED_VERSION) reports this in its init event,"
 			'so a re-dispatch fails the same way and bills again. Do not re-dispatch:'
 			'the bridge stays unavailable until it or the installed agy changes.'
+		)
+	elif [[ "$KIND" == step ]]; then
+		DETAILS+=(
+			'The call may already have run: the settings deny writes and shell'
+			'commands, not web searches or subagents.'
+			'Discard the result and re-dispatch.'
 		)
 	else
 		DETAILS+=('Discard the result and re-dispatch.')
@@ -580,5 +622,5 @@ if [[ "$VERIFY_STATUS" -ne 0 ]]; then
 		'Discard the result and re-dispatch.'
 fi
 
-printf 'Pin verified from the stream-json init event.\n' >&2
+printf 'Pin and read-only steps verified from the stream-json events.\n' >&2
 cat -- "$MESSAGE_FILE"
