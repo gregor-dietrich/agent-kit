@@ -607,18 +607,24 @@ def test_antigravity_session_context_emits_inject_steps() -> None:
     }
 
 
-def test_antigravity_session_context_ignores_a_json_py_in_the_cwd(
-    tmp_path: Path,
+@pytest.mark.parametrize("via", ["cwd", "PYTHONPATH"])
+def test_session_context_python_never_imports_a_shadowing_json_py(
+    tmp_path: Path, via: str
 ) -> None:
-    # The hook starts in whatever directory the session opened: a project's
-    # own json.py must not run in place of the stdlib module.
+    # Antigravity starts plugin hooks in the plugin root, so there the
+    # exposure is PYTHONPATH. The working directory matters where a client
+    # starts the hook in the session's directory and its payload holds one
+    # of the two marker strings the hook switches on.
     marker = tmp_path / "imported"
     (tmp_path / "json.py").write_text(
         f"open({str(marker)!r}, 'w').close()\n", encoding="utf-8"
     )
     result = subprocess.run(
         ["bash", str(_ROOT / "hooks" / "session-context.sh")],
-        cwd=tmp_path,
+        cwd=tmp_path if via == "cwd" else _ROOT,
+        env={**os.environ, "PYTHONPATH": str(tmp_path)}
+        if via == "PYTHONPATH"
+        else None,
         input=json.dumps(_AGY_PAYLOADS["SessionStart"]),
         capture_output=True,
         text=True,
