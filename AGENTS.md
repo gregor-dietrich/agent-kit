@@ -19,6 +19,7 @@ that can break silently.
 | `claude-agents/` | Claude Code role definitions (`model:`, comma `tools:`), bodies kept byte-for-byte identical to `agents/` and pinned by `tests/test_role_pins.py`; the manifest's `agents` list replaces Claude Code's default `agents/` scan, so the Antigravity files never load there (#94) |
 | `scripts/` | `agy-agent.sh` and `codex-agent.sh`, the opt-in cross-family bridges ai-review Stage 1c fires |
 | `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here |
+| `allowed_signers` | The release key's public half: the tagging snippet in `README.md`, "Releasing", signs only with the key it names |
 | `devkitw`, `devkit.toml` | devkit's wrapper, copied verbatim from the pinned tag and never edited, and its pin |
 
 ## Rules

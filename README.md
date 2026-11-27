@@ -270,14 +270,21 @@ from the manifests and is signed with a dedicated SSH release key
    landing between it and tagging. The forge merges fast-forward only,
    so the pull request's commits land as they are and the tag goes on
    the last of them.
-4. From a clean checkout at the repository root, sign and push the
-   annotated tag `vX.Y.Z` and fast-forward the protected `release` branch
-   with the snippet below. It takes no version: it tags the one the
-   three manifests on `main` declare, so it runs only after step 3.
-   Before that the manifests still name the last release, and it stops
-   at "tag ... already exists". It needs git 2.35 or later, OpenSSH 8.1
-   or later, and the dedicated release private key at
-   `~/.ssh/id_agent_kit` or `AGENT_KIT_RELEASE_KEY`:
+4. Tag with the snippet below, from the clone's root. It takes no
+   version: it tags the one the three manifests on `main` declare, so it
+   runs only after step 3. Before that the manifests still name the last
+   release, and it stops at "tag ... already exists". It needs git 2.35
+   or later, ssh-keygen (OpenSSH 8.1 or later), and the release key's
+   private key file
+   (`SHA256:dYsHxqttXNQpFhcKpXte7CSrVi2uHdexcEBomV0SHCE`) at
+   `~/.ssh/id_agent_kit`, or at the path `AGENT_KIT_RELEASE_KEY` names;
+   no ssh-agent is involved. It switches to `main`, fast-forwards it to
+   the remote's, refuses when the two still differ or the tree is not
+   clean, and signs with that file only when its public key is the one
+   `allowed_signers` names, so a tag can only be signed by the pinned
+   key. It pushes the tag, deleting the local one when that push fails,
+   and fast-forwards the protected `release` branch to the tagged
+   commit:
 
    ```sh
    git switch -q main && git pull -q --ff-only origin main &&
@@ -285,9 +292,11 @@ from the manifests and is signed with a dedicated SSH release key
        { echo "main differs from origin's main" >&2; false; }; } &&
      { [ -z "$(git status --porcelain --untracked-files=all --ignore-submodules=none)" ] ||
        { echo "working tree is not clean" >&2; false; }; } &&
+   key=$(sed -n 's/^agent-kit-release namespaces="git" \(.*\)$/\1/p' allowed_signers) &&
+     : "${key:?allowed_signers carries no agent-kit-release line}" &&
    file=${AGENT_KIT_RELEASE_KEY:-$HOME/.ssh/id_agent_kit} &&
-     { [ -r "$file" ] ||
-       { echo "release key not readable: $file" >&2; false; }; } &&
+     { [ "$(ssh-keygen -y -f "$file" | cut -d' ' -f1,2)" = "$key" ] ||
+       { echo "$file is not the release key allowed_signers names" >&2; false; }; } &&
    tag=v$(python3 -c 'import json, sys; vs = {json.load(open(p))["version"].strip() for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".antigravity-plugin/plugin.json")}; assert len(vs) == 1, f"manifest versions differ: {vs}"; v = next(iter(vs)); print(v or sys.exit("plugin.json declares no version"))') &&
      { ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null ||
        { echo "tag $tag already exists: main's manifests declare ${tag#v}, merge the release pull request first" >&2; false; }; } &&
@@ -297,6 +306,7 @@ from the manifests and is signed with a dedicated SSH release key
      git push origin "${tag}^{commit}:refs/heads/release"
    ```
 
-   If the repository carries a pinned public key in `allowed_signers`,
-   verify `ssh-keygen -y -f "$file"` against it before tagging, as devkit
-   does.
+   The release key signs agent-kit's release tags and nothing else: a
+   signature binds the commit, type, tag name and namespace, not the
+   repository. To check a tag against the pinned key, run
+   `git -c gpg.ssh.allowedSignersFile=allowed_signers verify-tag vX.Y.Z`.
