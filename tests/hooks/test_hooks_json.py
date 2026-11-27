@@ -193,10 +193,18 @@ def hostile(
     if request.param == "pythonhome":
         return {"PYTHONHOME": str(tmp_path / "nonexistent")}, None
     # The venv's python3 has the user site disabled, so this case runs the
-    # floor interpreter, where each guard reaches its own verdict.
+    # floor interpreter, where each guard reaches its own verdict. HOME is
+    # what a Python started with -E alone still reads, so it pins -s.
+    # PYTHONUSERBASE keeps the lookup below out of the real user site, and
+    # an empty PYTHONNOUSERSITE overrides an ambient one, which would
+    # switch the user site off by itself.
     bin_dir = python3_dir("3.10")
     home = tmp_path / "home"
-    env = {"HOME": str(home), "PYTHONUSERBASE": str(home / ".local")}
+    env = {
+        "HOME": str(home),
+        "PYTHONUSERBASE": str(home / ".local"),
+        "PYTHONNOUSERSITE": "",
+    }
     site = subprocess.run(
         [
             bin_dir / "python3",

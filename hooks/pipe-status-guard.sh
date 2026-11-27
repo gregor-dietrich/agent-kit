@@ -6,11 +6,8 @@
 # path cheap: a command with no pipe at all cannot trip the rule and exits
 # here without paying an interpreter spawn. Conservative by construction:
 # any pipe character falls through to the real tokenizing checks in Python.
-# `-E` makes Python ignore PYTHONPATH and PYTHONHOME, and `-s` leaves out the
-# user site: a module on PYTHONPATH named like a stdlib one, a PYTHONHOME
-# that points nowhere, or startup code in the user site (a `.pth` file, a
-# usercustomize.py) would otherwise crash the guard open before it reads
-# the call. The script's own directory stays importable.
+# Python starts with `-E -s`, so the session's Python environment cannot
+# crash the guard open (AGENTS.md, "Rules").
 
 set -euo pipefail
 

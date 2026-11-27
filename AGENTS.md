@@ -13,7 +13,7 @@ that can break silently.
 | `.codex-plugin/plugin.json` | The Codex twin: same name and version, plus Codex's `interface` block |
 | `.antigravity-plugin/plugin.json` | The Antigravity twin: same name and version |
 | `hooks.json` | Antigravity root hook registration (relative `./hooks/...` commands and Antigravity tool matchers) |
-| `hooks/` | `hooks.json` (read by Claude Code and Codex), the guard scripts and the session temp-dir pruner it registers, and `session-context.md`, the only text injected into every session |
+| `hooks/` | `hooks.json` (read by Claude Code and Codex), the guard scripts and the session temp-dir pruner it registers, each behind its bash wrapper, and `session-context.md`, the only text injected into every session |
 | `skills/` | One `<name>/SKILL.md` per skill, shared by all three clients (keep `SKILL.md` bodies at most 24,000 bytes for Antigravity; put bulk reference docs under `references/`) |
 | `agents/` | Antigravity-native role definitions (`model:` tiers, YAML `tools:` lists — `code-reviewer`, `software-architect` and `scout` omit write tools and hold sandboxed `run_command`) plus Codex (`codex-model`, `codex-effort`, `codex-sandbox`) and Antigravity bridge (`agy-model`) pins |
 | `claude-agents/` | Claude Code role definitions (`model:`, comma `tools:`), bodies kept byte-for-byte identical to `agents/` and pinned by `tests/test_role_pins.py`; the manifest's `agents` list replaces Claude Code's default `agents/` scan, so the Antigravity files never load there (#94) |
@@ -27,24 +27,25 @@ that can break silently.
   A PreToolUse hook that crashes fails open — the tool call proceeds —
   so a broken guard is silent, and the tests are what notices. Test what
   a guard denies _and_ what it deliberately lets through.
-- Hooks are stdlib-only Python plus a bash prefilter, and fail open on
-  any payload they cannot parse. Never block a call you cannot read.
+- Hooks are stdlib-only Python behind a bash wrapper, which for the two
+  Bash guards is also a prefilter, and fail open on any payload they
+  cannot parse. Never block a call you cannot read.
   They run under the user's `python3`, not the 3.13 test venv, so hook
   code stays within `hook_lib.FLOOR` (3.10); below it every guard denies,
   naming the floor, and the pruner, a SessionStart hook with no call to
   refuse, exits quietly.
-  A registered hook that runs a `hooks/*.py` script starts it from a
-  bash wrapper as `python3 -E -s`. `-E` ignores `PYTHONPATH` and
-  `PYTHONHOME`, and `-s` leaves out the user site: a module on
-  `PYTHONPATH` named like a stdlib one, a `PYTHONHOME` that points
-  nowhere, or startup code in the user site (a `.pth` file, a
-  `usercustomize.py`) would otherwise crash the hook open. (`-I` would
-  also drop the script's directory, from which the hooks import
-  `hook_lib`.) `tests/hooks/test_hooks_json.py` runs each such
-  registration under all three.
   A call a guard _has_ read, that targets what it protects but whose
   effect it cannot model (a patch it cannot simulate, an Edit whose
   `old_string` it cannot locate), is denied: passing it is the bypass.
+  The wrapper starts its `hooks/*.py` script as `python3 -E -s`. `-E`
+  ignores every `PYTHON*` variable and `-s` leaves out the user site: a
+  module on `PYTHONPATH` named like a stdlib one, a `PYTHONHOME` that
+  points nowhere, a `PYTHONSAFEPATH` that hides `hook_lib`, or startup
+  code in the user site (a `.pth` file, a `usercustomize.py`) would
+  otherwise crash the hook open. (`-I` would also drop the script's
+  directory, from which the hooks import `hook_lib`.)
+  `tests/hooks/test_hooks_json.py` runs each such registration under a
+  shadowing `PYTHONPATH`, a bad `PYTHONHOME` and a user site that exits.
 - Keep `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` and
   `.antigravity-plugin/plugin.json` at the same `name` and `version`.
   Pull requests never change `version`; only a deliberate release PR
@@ -110,7 +111,7 @@ that can break silently.
   puts `.venv`'s `bin` first on PATH, so the hooks the tests start
   run under the venv's python3, where coverage measures them; in a
   session they run under the user's python3. The floor tests run each
-  guard once at 3.9 and 3.10, and an import check holds every
+  guard once at 3.8, 3.9 and 3.10, and an import check holds every
   `hooks/*.py` import, function-level ones included, to 3.10's stdlib.
 - `make lint` — `lint-repo`, then ruff (80 columns, E501 included;
   target py310, the hooks' floor, and py313 for `tests/`), vulture,
