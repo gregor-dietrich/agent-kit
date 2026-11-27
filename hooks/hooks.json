@@ -10,7 +10,7 @@
           },
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/prune_session_tmp.py\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/prune-session-tmp.sh\"",
             "timeout": 5
           }
         ]
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/decisions_status_guard.py\"",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/decisions-status-guard.sh\"",
             "timeout": 5
           }
         ]

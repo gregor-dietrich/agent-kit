@@ -33,6 +33,15 @@ that can break silently.
   code stays within `hook_lib.FLOOR` (3.10); below it every guard denies,
   naming the floor, and the pruner, a SessionStart hook with no call to
   refuse, exits quietly.
+  A registered hook that runs a `hooks/*.py` script starts it from a
+  bash wrapper as `python3 -E -s`. `-E` ignores `PYTHONPATH` and
+  `PYTHONHOME`, and `-s` leaves out the user site: a module on
+  `PYTHONPATH` named like a stdlib one, a `PYTHONHOME` that points
+  nowhere, or startup code in the user site (a `.pth` file, a
+  `usercustomize.py`) would otherwise crash the hook open. (`-I` would
+  also drop the script's directory, from which the hooks import
+  `hook_lib`.) `tests/hooks/test_hooks_json.py` runs each such
+  registration under all three.
   A call a guard _has_ read, that targets what it protects but whose
   effect it cannot model (a patch it cannot simulate, an Edit whose
   `old_string` it cannot locate), is denied: passing it is the bypass.

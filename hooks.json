@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "./hooks/decisions_status_guard.py",
+            "command": "./hooks/decisions-status-guard.sh",
             "timeout": 5
           }
         ]

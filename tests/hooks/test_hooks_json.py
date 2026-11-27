@@ -27,7 +27,7 @@ _HOOKS: dict[str, list[dict[str, Any]]] = json.loads(
 _COMMAND = re.compile(r'^"\$\{CLAUDE_PLUGIN_ROOT\}/hooks/([\w.-]+)"$')
 
 # The PreToolUse registrations' `"timeout": 5` is enough: measured on the
-# development machine, each guard answers in 17 to 22 ms warm and about
+# development machine, each guard answers in 17 to 23 ms warm and about
 # 90 ms on a first run. A guard that exceeds its timeout lets the call
 # through, so the value needs a recorded reason; it stays unless a
 # measurement says otherwise. (The SessionStart hooks were not measured and
@@ -71,17 +71,17 @@ def test_the_guards_are_wired_to_the_tools_they_guard() -> None:
     }
     assert wired == {
         ("SessionStart", "", "session-context.sh"),
-        ("SessionStart", "", "prune_session_tmp.py"),
+        ("SessionStart", "", "prune-session-tmp.sh"),
         ("PreToolUse", "Bash", "pipe-status-guard.sh"),
         ("PreToolUse", "Bash", "tea-guard.sh"),
-        ("PreToolUse", "Write|Edit|apply_patch", "decisions_status_guard.py"),
+        ("PreToolUse", "Write|Edit|apply_patch", "decisions-status-guard.sh"),
     }
 
 
 def _probe(matcher: str, script: str, root: Path) -> dict[str, Any]:
     """A payload the registered guard must deny, run from *root*."""
     log = root / "docs" / "decisions.md"
-    if script == "decisions_status_guard.py":
+    if script == "decisions-status-guard.sh":
         return {
             "cwd": str(root),
             "tool_name": "Edit",
@@ -137,13 +137,17 @@ def _run_guard_cmd(
 
 
 def _run_guard(
-    matcher: str, command: str, root: Path, path_prefix: Path | None = None
+    matcher: str,
+    command: str,
+    root: Path,
+    path_prefix: Path | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run a registered guard on its probe; return its decision envelope.
 
     Expanded and run through a shell the way the clients invoke it.
-    *path_prefix* goes first on PATH, so its ``python3`` is the one both
-    the prefilters and the ``env python3`` shebang find.
+    *path_prefix* goes first on PATH, so its ``python3`` is the one the
+    wrappers find. *extra_env* joins the environment.
     """
     raw = _run_guard_cmd(
         command,
@@ -151,7 +155,7 @@ def _run_guard(
         root,
         _probe(matcher, _script(command).name, root),
         path_prefix=path_prefix,
-        extra_env={"CLAUDE_PLUGIN_ROOT": str(_ROOT)},
+        extra_env={"CLAUDE_PLUGIN_ROOT": str(_ROOT), **(extra_env or {})},
     )
     decision: dict[str, Any] = raw["hookSpecificOutput"]
     assert decision["permissionDecision"] == "deny", decision
@@ -166,6 +170,67 @@ def test_the_registered_command_denies_end_to_end(
     # pass on, would fail open in a session and in silence — here it fails
     # the test.
     _run_guard(matcher, command, tmp_path)
+
+
+@pytest.fixture(params=["pythonpath", "pythonhome", "user-site"])
+def hostile(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    python3_dir: Callable[[str], Path],
+) -> tuple[dict[str, str], Path | None]:
+    """An environment that breaks a Python started without ``-E -s``.
+
+    Returns the extra environment and the PATH prefix to run under.
+    """
+    if request.param == "pythonpath":
+        # A stdlib-named module ahead of the standard library.
+        shadow = tmp_path / "shadow"
+        shadow.mkdir()
+        (shadow / "json.py").write_text(
+            'raise RuntimeError("shadowed")\n', encoding="utf-8"
+        )
+        return {"PYTHONPATH": str(shadow)}, None
+    if request.param == "pythonhome":
+        return {"PYTHONHOME": str(tmp_path / "nonexistent")}, None
+    # The venv's python3 has the user site disabled, so this case runs the
+    # floor interpreter, where each guard reaches its own verdict.
+    bin_dir = python3_dir("3.10")
+    home = tmp_path / "home"
+    env = {"HOME": str(home), "PYTHONUSERBASE": str(home / ".local")}
+    site = subprocess.run(
+        [
+            bin_dir / "python3",
+            "-c",
+            "import site; print(site.getusersitepackages())",
+        ],
+        env={**os.environ, **env},
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
+    ).stdout.strip()
+    Path(site).mkdir(parents=True)
+    (Path(site) / "usercustomize.py").write_text(
+        'raise SystemExit("usercustomize ran")\n', encoding="utf-8"
+    )
+    return env, bin_dir
+
+
+@pytest.mark.parametrize(("event", "matcher", "command"), _GUARDS)
+def test_the_registered_command_ignores_a_hostile_python_environment(
+    event: str,
+    matcher: str,
+    command: str,
+    tmp_path: Path,
+    hostile: tuple[dict[str, str], Path | None],
+) -> None:
+    # Each case stops or hijacks a Python started without -E -s (a
+    # stdlib-named module on PYTHONPATH, a bad PYTHONHOME, a raising
+    # usercustomize in the user site), so the hook would give no decision
+    # and the guarded call would proceed, in silence. Started with -E -s,
+    # it still reaches its verdict.
+    env, prefix = hostile
+    _run_guard(matcher, command, tmp_path, prefix, env)
 
 
 @pytest.fixture(scope="session")
@@ -374,7 +439,11 @@ def test_session_context_stays_small() -> None:
 _SESSION = "00000000-0000-4000-8000-00000000000{}"
 
 
-def _run_pruner(base: Path, path_prefix: Path | None = None) -> Path:
+def _run_pruner(
+    base: Path,
+    path_prefix: Path | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> Path:
     """Run the registered pruner on a stale session and the current one.
 
     Returns the stale one; the current one must outlive every run. The
@@ -392,11 +461,12 @@ def _run_pruner(base: Path, path_prefix: Path | None = None) -> Path:
         "CLAUDE_PLUGIN_ROOT": str(_ROOT),
         "CLAUDE_CODE_TMPDIR": str(base),
         "CLAUDE_CONFIG_DIR": str(base / "config"),
+        **(extra_env or {}),
     }
     if path_prefix is not None:
         env["PATH"] = f"{path_prefix}{os.pathsep}{env['PATH']}"
     result = subprocess.run(
-        ["sh", "-c", _registered("prune_session_tmp.py")],
+        ["sh", "-c", _registered("prune-session-tmp.sh")],
         cwd=base,
         env=env,
         input=json.dumps(
@@ -429,6 +499,16 @@ def test_the_pruner_removes_a_stale_session_in_the_background(
     # detached child finishes the job. What it keeps is pinned in process,
     # deterministically, in test_prune_session_tmp.py.
     assert _gone(_run_pruner(tmp_path))
+
+
+def test_the_pruner_ignores_a_hostile_python_environment(
+    tmp_path: Path, hostile: tuple[dict[str, str], Path | None]
+) -> None:
+    # Same as the guards: none of these environments may stop the pruner
+    # (status 0, empty stdout, as _run_pruner checks) or keep it from
+    # pruning.
+    env, prefix = hostile
+    assert _gone(_run_pruner(tmp_path, prefix, env))
 
 
 @pytest.mark.parametrize("version", ["3.8", "3.9", "3.10"])
@@ -502,20 +582,20 @@ def test_antigravity_guards_are_wired_to_the_tools_they_guard() -> None:
                 "write_file|edit_file|write_to_file|replace_file_content|"
                 "multi_replace_file_content|sed_file"
             ),
-            "decisions_status_guard.py",
+            "decisions-status-guard.sh",
         ),
     }
     [dsg_matcher] = [
         matcher
         for _, matcher, name in wired
-        if name == "decisions_status_guard.py"
+        if name == "decisions-status-guard.sh"
     ]
     assert set(dsg_matcher.split("|")) == hook_lib.ANTIGRAVITY_FILE_TOOLS
 
 
 def _agy_probe(script: str, root: Path) -> dict[str, Any]:
     log = root / "docs" / "decisions.md"
-    if script == "decisions_status_guard.py":
+    if script == "decisions-status-guard.sh":
         return {
             "hookEventName": "PreToolUse",
             "conversationId": "0000",
@@ -545,7 +625,10 @@ def _agy_probe(script: str, root: Path) -> dict[str, Any]:
 
 
 def _run_agy_guard(
-    command: str, root: Path, path_prefix: Path | None = None
+    command: str,
+    root: Path,
+    path_prefix: Path | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     # Antigravity runs plugin hooks with cwd = <plugin-root>.
     decision = _run_guard_cmd(
@@ -554,6 +637,7 @@ def _run_agy_guard(
         root,
         _agy_probe(_agy_script(command).name, root),
         path_prefix=path_prefix,
+        extra_env=extra_env,
     )
     assert decision["decision"] == "deny", decision
     return decision
@@ -564,6 +648,20 @@ def test_antigravity_registered_command_denies_end_to_end(
     event: str, matcher: str, command: str, tmp_path: Path
 ) -> None:
     _run_agy_guard(command, tmp_path)
+
+
+@pytest.mark.parametrize(("event", "matcher", "command"), _AGY_GUARDS)
+def test_antigravity_registered_command_ignores_a_hostile_python_environment(
+    event: str,
+    matcher: str,
+    command: str,
+    tmp_path: Path,
+    hostile: tuple[dict[str, str], Path | None],
+) -> None:
+    # Same as the Claude registrations: none of these environments may
+    # crash a guard open.
+    env, prefix = hostile
+    _run_agy_guard(command, tmp_path, prefix, env)
 
 
 @pytest.mark.parametrize("version", ["3.8", "3.9", "3.10"])
