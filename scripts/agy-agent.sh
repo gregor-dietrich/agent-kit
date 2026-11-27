@@ -20,9 +20,9 @@
 # `result` must report `status: "SUCCESS"` and a non-empty `response`. A run
 # violating any check exits 3 rather than handing back an unverified answer.
 # The `init` content is checked as it arrives, by a watcher beside `agy`: a
-# mismatch stops `agy` with SIGTERM before it spends more. The checks always
-# run again over the whole stream once `agy` has exited, whatever the watcher
-# saw, and that run alone decides the outcome.
+# mismatch gets `agy` a SIGTERM before it spends more. The checks always run
+# again over the whole stream once `agy` has exited, and a run the watcher
+# stopped exits 3 whatever they find.
 #
 # Before dispatching, this wrapper scans the target repository for repo-local
 # executable Antigravity configs under `.agents`, `.agent`, `_agents`, `_agent`
@@ -60,8 +60,8 @@
 #        configs refused, or a pin key missing/malformed; `agy` did not run
 #   3    the pin could not be verified (`init` absent, duplicated or
 #        mismatched), permissions or tools were unexpected, or `agy` returned
-#        no valid answer: discard. A mismatched `init` content takes
-#        precedence over `agy`'s own status and stops `agy` at once. A
+#        no valid answer: discard. A mismatched `init` content, and a run
+#        the watcher stopped, take precedence over `agy`'s own status. A
 #        permission or tools mismatch recurs until the bridge or the CLI
 #        changes, so do not re-dispatch it; a model mismatch may not.
 #   124  the wall-clock bound stopped the run; 137 it had to be killed
@@ -209,6 +209,7 @@ command -v python3 > /dev/null 2>&1 ||
 # stream-json contract cannot be proven. A newer one than MEASURED_VERSION
 # runs, with a notice.
 INSTALLED_VERSION="$(agy --version 2> /dev/null | awk 'NF { print; exit }' || true)"
+# Anything after X.Y.Z is ignored, by the floor and the notice alike.
 VERSION_RE='^([0-9]+)\.([0-9]+)\.([0-9]+)([^0-9].*)?$'
 # older_than <a> <b>: true when dotted version <a> is older than <b>.
 older_than() {
@@ -350,11 +351,18 @@ def pid_alive(pid):
 
 
 def watch(stream_path, expected_model, pid):
-    """Exit 3 after TERMing pid on a bad first init, else 0 once pid is gone."""
+    """Exit 3 after TERMing pid on a bad first init, else 0 once pid is gone.
+
+    Lines end at a newline only; `verify` also splits at a bare carriage
+    return, so a stream using one is judged by `verify` alone. The watch
+    also ends when the wrapper is gone: a signalled wrapper exits without
+    reaping agy, and a pid nobody reaps would look alive forever.
+    """
     pos = 0
     buf = b""
     seen = False
-    while pid_alive(pid):
+    parent = os.getppid()
+    while os.getppid() == parent and pid_alive(pid):
         if not seen:
             try:
                 with open(stream_path, "rb") as fh:
@@ -493,8 +501,8 @@ WATCH_STATUS=0
 AGY_PID=$!
 # Under `timeout`, AGY_PID is timeout's, which forwards TERM to agy. The
 # watcher exits 3 after TERMing agy, and 0 once agy is gone; any other status
-# is a crash, which changes nothing: the verification below decides. It
-# outlives no one and is never signalled: it ends within a poll of agy.
+# is a crash, which changes nothing: the verification below decides. It is
+# never signalled: it ends within a poll of agy, or of this wrapper.
 python3 -I -c "$CHECK_SRC" watch "$STREAM_FILE" "$MODEL" "$AGY_PID" \
 	> /dev/null 2>&1 &
 WATCH_PID=$!
@@ -539,9 +547,10 @@ fi
 # An init content mismatch outranks agy's own status (a TERMed agy exits
 # non-zero) and does not depend on whether the watcher saw it first.
 KIND="$(field KIND)"
-if [[ "$KIND" == init || "$KIND" == pin ]]; then
+if [[ "$KIND" == init || "$KIND" == pin || "$WATCH_STATUS" -eq 3 ]]; then
 	DETAILS=()
-	[[ "$WATCH_STATUS" -ne 3 ]] || DETAILS+=('Stopped agy at its init event.')
+	[[ "$WATCH_STATUS" -ne 3 ]] ||
+		DETAILS+=('Sent agy SIGTERM at its init event.')
 	if [[ "$KIND" == init ]]; then
 		# Deterministic for the installed agy: say so.
 		DETAILS+=(
@@ -552,7 +561,9 @@ if [[ "$KIND" == init || "$KIND" == pin ]]; then
 	else
 		DETAILS+=('Discard the result and re-dispatch.')
 	fi
-	fail 3 "$(field ERR)" "${DETAILS[@]}"
+	ERR_MSG="$(field ERR)"
+	fail 3 "${ERR_MSG:-the run did not verify against $ROLE_FILE}" \
+		"${DETAILS[@]}"
 fi
 
 if [[ -n "$TIMEOUT_BIN" ]] && ((STATUS == 124 || STATUS == 137)); then

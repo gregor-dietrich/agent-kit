@@ -42,10 +42,12 @@ _PROMPT = "Review the diff.\n"
 _DEFAULT = object()
 _REDISPATCH = "Discard the result and re-dispatch."
 _NO_REDISPATCH = "Do not re-dispatch"
-_STOPPED = "Stopped agy at its init event."
+_STOPPED = "Sent agy SIGTERM at its init event."
 
 # `linger` holds a sleep length: the fake then stays up that long and stops on
-# TERM, taking its sleep with it. `split` writes stdout in two halves.
+# TERM, taking its sleep with it; its trap and `started` come before stdout,
+# so a TERM that answers stdout finds both. `split` writes stdout in two
+# halves.
 _FAKE_AGY = """#!@BASH@
 d="$FAKE_AGY_DIR"
 printf '%s\\n' "$*" >> "$d/calls"
@@ -54,6 +56,10 @@ printf '%s\\0' "$@" > "$d/argv"
 pwd -P > "$d/cwd"
 cat > "$d/stdin"
 [ -f "$d/stderr" ] && cat "$d/stderr" >&2
+if [ -f "$d/linger" ]; then
+    trap 'kill $! 2> /dev/null; exit 143' TERM
+    : > "$d/started"
+fi
 if [ -f "$d/split" ]; then
     out=$(cat "$d/stdout")
     half=$(( ${#out} / 2 ))
@@ -64,8 +70,6 @@ else
     cat "$d/stdout"
 fi
 if [ -f "$d/linger" ]; then
-    trap 'kill $!; exit 143' TERM
-    : > "$d/started"
     sleep "$(cat "$d/linger")" &
     wait $!
     : > "$d/survived"
@@ -939,18 +943,38 @@ def test_unterminated_bad_init_is_caught_by_final_verification(
     assert _REDISPATCH not in res.stderr
 
 
-@pytest.mark.parametrize("attempt", range(3))
-def test_bad_init_outranks_agys_own_status(
-    bridge: Bridge, attempt: int
-) -> None:
-    (bridge.fake / "stdout").write_text(
-        _stream(tools=["run_command"]), encoding="utf-8"
-    )
+def test_bad_init_outranks_agys_own_status(bridge: Bridge) -> None:
+    # No newline: the watcher never sees the line, so agy exits 7 by itself.
+    (bridge.fake / "stdout").write_text(_BAD_INITS[1][0].rstrip("\n"), "utf-8")
     (bridge.fake / "status").write_text("7\n", encoding="utf-8")
     res = bridge.run("code-reviewer", str(bridge.prompt))
-    assert res.returncode == 3, (attempt, res.stderr)
+    assert res.returncode == 3, res.stderr
     assert _NO_REDISPATCH in res.stderr
     assert "agy exited 7" not in res.stderr
+
+
+def test_a_stopped_run_exits_3_even_when_verify_names_another_fault(
+    bridge: Bridge,
+) -> None:
+    # Two inits, the first one bad: the watcher stops agy, verify reports
+    # the count. Without the watcher's status this exited with agy's 143.
+    bad = _BAD_INITS[1][0]
+    (bridge.fake / "stdout").write_text(bad + bad, encoding="utf-8")
+    (bridge.fake / "linger").write_text("30\n", encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 3, res.stderr
+    assert "init event count" in res.stderr
+    assert _STOPPED in res.stderr
+    assert _REDISPATCH in res.stderr
+
+
+def test_an_error_value_holding_an_equals_sign_is_printed_whole(
+    bridge: Bridge,
+) -> None:
+    (bridge.fake / "stdout").write_text(_stream(model="a=b"), encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 3
+    assert "actual 'a=b'" in res.stderr
 
 
 def test_valid_init_is_not_stopped(bridge: Bridge) -> None:
