@@ -15,8 +15,8 @@ fi
 
 case "$input" in
 *'"hookEventName"'* | *'"conversationId"'*)
-	# -I: nothing but the stdlib is importable, so no json.py in the working
-	# directory or on PYTHONPATH runs in its place.
+	# -I keeps the working directory and PYTHONPATH off the import path, so
+	# no json.py there runs in place of the stdlib's.
 	printf '%s' "$input" | python3 -I -c '
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as fh:

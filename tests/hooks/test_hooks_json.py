@@ -607,24 +607,42 @@ def test_antigravity_session_context_emits_inject_steps() -> None:
     }
 
 
+@pytest.mark.parametrize("python", ["venv", "3.10"])
 @pytest.mark.parametrize("via", ["cwd", "PYTHONPATH"])
 def test_session_context_python_never_imports_a_shadowing_json_py(
-    tmp_path: Path, via: str
+    tmp_path: Path,
+    via: str,
+    python: str,
+    python3_dir: Callable[[str], Path],
 ) -> None:
     # Antigravity starts plugin hooks in the plugin root, so there the
     # exposure is PYTHONPATH. The working directory matters where a client
     # starts the hook in the session's directory and its payload holds one
     # of the two marker strings the hook switches on.
+    #
+    # The environment is built, not inherited, or the cwd case passes
+    # without the flag: coverage's variable starts coverage in the venv's
+    # python3 while `site` runs, which imports the stdlib json before the
+    # working directory is on the path, and an ambient PYTHONSAFEPATH
+    # keeps it off by itself. -I keeps it off by isolated mode at the 3.10
+    # floor and by the -P it implies from 3.11, so both run.
     marker = tmp_path / "imported"
     (tmp_path / "json.py").write_text(
         f"open({str(marker)!r}, 'w').close()\n", encoding="utf-8"
     )
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("COVERAGE_", "PYTHON"))
+    }
+    if python != "venv":
+        env["PATH"] = os.pathsep.join([str(python3_dir(python)), env["PATH"]])
+    if via == "PYTHONPATH":
+        env["PYTHONPATH"] = str(tmp_path)
     result = subprocess.run(
         ["bash", str(_ROOT / "hooks" / "session-context.sh")],
         cwd=tmp_path if via == "cwd" else _ROOT,
-        env={**os.environ, "PYTHONPATH": str(tmp_path)}
-        if via == "PYTHONPATH"
-        else None,
+        env=env,
         input=json.dumps(_AGY_PAYLOADS["SessionStart"]),
         capture_output=True,
         text=True,
