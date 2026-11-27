@@ -140,58 +140,7 @@ that can break silently.
 
 ## Releasing
 
-Only the maintainer cuts a release. An agent prepares the release pull
-request of step 2, its `version` bump and its `CHANGELOG.md` entry, only
-when the maintainer asks for that release, and never tags a release or
-pushes `release`. Tags are never moved or reused; fix a broken release
-with a new patch release.
-Follow the snippet below rather than `make tag`: release tags are signed
-with a dedicated SSH release key (`~/.ssh/id_agent_kit`, overridable via
-`AGENT_KIT_RELEASE_KEY`), not the ambient git signing key.
-
-1. Confirm at least one installed-copy path changed since the last tag
-   (`git log <last-tag>..origin/main --stat`). Do not cut a release with
-   nothing shippable to list.
-2. Open a release pull request targeting `main` that:
-   - bumps `version` to `X.Y.Z` in `.claude-plugin/plugin.json`,
-     `.codex-plugin/plugin.json` and `.antigravity-plugin/plugin.json`
-     (`pyproject.toml` is test-environment metadata and is not bumped);
-   - adds a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md`
-     summarizing user-facing changes since the last release (no
-     `## [Unreleased]` section; ordinary PRs never edit `CHANGELOG.md`);
-   - passes `make lint`, `make gate`, `claude plugin validate .` and
-     `agy plugin validate .`.
-3. Merge the release pull request to `main` with no other pull request
-   landing between it and tagging. The forge merges fast-forward only,
-   so the pull request's commits land as they are and the tag goes on
-   the last of them.
-4. From a clean checkout at the repository root, sign and push the
-   annotated tag `vX.Y.Z` and fast-forward the protected `release` branch
-   with the snippet below. It takes no version: it tags the one the
-   three manifests on `main` declare, so it runs only after step 3.
-   Before that the manifests still name the last release, and it stops
-   at "tag ... already exists". It needs git 2.35 or later, OpenSSH 8.1
-   or later, and the dedicated release private key at
-   `~/.ssh/id_agent_kit` or `AGENT_KIT_RELEASE_KEY`:
-
-   ```sh
-   git switch -q main && git pull -q --ff-only origin main &&
-     { [ "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)" ] ||
-       { echo "main differs from origin's main" >&2; false; }; } &&
-     { [ -z "$(git status --porcelain --untracked-files=all --ignore-submodules=none)" ] ||
-       { echo "working tree is not clean" >&2; false; }; } &&
-   file=${AGENT_KIT_RELEASE_KEY:-$HOME/.ssh/id_agent_kit} &&
-     { [ -r "$file" ] ||
-       { echo "release key not readable: $file" >&2; false; }; } &&
-   tag=v$(python3 -c 'import json, sys; vs = {json.load(open(p))["version"].strip() for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".antigravity-plugin/plugin.json")}; assert len(vs) == 1, f"manifest versions differ: {vs}"; v = next(iter(vs)); print(v or sys.exit("plugin.json declares no version"))') &&
-     { ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null ||
-       { echo "tag $tag already exists: main's manifests declare ${tag#v}, merge the release pull request first" >&2; false; }; } &&
-     git -c gpg.format=ssh -c user.signingKey="$file" tag -a -s "$tag" -m "agent-kit $tag" &&
-     { git push origin "$tag" ||
-       { git tag -d "$tag" >/dev/null; echo "tag push failed; deleted local $tag" >&2; false; }; } &&
-     git push origin "${tag}^{commit}:refs/heads/release"
-   ```
-
-   If the repository carries a pinned public key in `allowed_signers`,
-   verify `ssh-keygen -y -f "$file"` against it before tagging, as devkit
-   does.
+Only the maintainer cuts a release, by the procedure in `README.md`,
+"Releasing". An agent prepares the release pull request of its step 2,
+the `version` bump and the `CHANGELOG.md` entry, only when the maintainer
+asks for that release, and never tags a release or pushes `release`.
