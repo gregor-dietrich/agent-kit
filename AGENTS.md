@@ -167,9 +167,12 @@ with a dedicated SSH release key (`~/.ssh/id_agent_kit`, overridable via
    the last of them.
 4. From a clean checkout at the repository root, sign and push the
    annotated tag `vX.Y.Z` and fast-forward the protected `release` branch
-   (needs git 2.35 or later, OpenSSH 8.1 or later, and the dedicated
-   release private key at `~/.ssh/id_agent_kit` or
-   `AGENT_KIT_RELEASE_KEY`):
+   with the snippet below. It takes no version: it tags the one the
+   three manifests on `main` declare, so it runs only after step 3.
+   Before that the manifests still name the last release, and it stops
+   at "tag ... already exists". It needs git 2.35 or later, OpenSSH 8.1
+   or later, and the dedicated release private key at
+   `~/.ssh/id_agent_kit` or `AGENT_KIT_RELEASE_KEY`:
 
    ```sh
    git switch -q main && git pull -q --ff-only origin main &&
@@ -182,7 +185,7 @@ with a dedicated SSH release key (`~/.ssh/id_agent_kit`, overridable via
        { echo "release key not readable: $file" >&2; false; }; } &&
    tag=v$(python3 -c 'import json, sys; vs = {json.load(open(p))["version"].strip() for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".antigravity-plugin/plugin.json")}; assert len(vs) == 1, f"manifest versions differ: {vs}"; v = next(iter(vs)); print(v or sys.exit("plugin.json declares no version"))') &&
      { ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null ||
-       { echo "tag $tag already exists" >&2; false; }; } &&
+       { echo "tag $tag already exists: main's manifests declare ${tag#v}, merge the release pull request first" >&2; false; }; } &&
      git -c gpg.format=ssh -c user.signingKey="$file" tag -a -s "$tag" -m "agent-kit $tag" &&
      { git push origin "$tag" ||
        { git tag -d "$tag" >/dev/null; echo "tag push failed; deleted local $tag" >&2; false; }; } &&
