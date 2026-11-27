@@ -15,7 +15,8 @@ fi
 
 case "$input" in
 *'"hookEventName"'* | *'"conversationId"'*)
-	printf '%s' "$input" | python3 -c '
+	# -I: the session's directory must not shadow the stdlib (a json.py).
+	printf '%s' "$input" | python3 -I -c '
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as fh:
     text = fh.read()

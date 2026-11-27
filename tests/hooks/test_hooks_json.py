@@ -607,6 +607,29 @@ def test_antigravity_session_context_emits_inject_steps() -> None:
     }
 
 
+def test_antigravity_session_context_ignores_a_json_py_in_the_cwd(
+    tmp_path: Path,
+) -> None:
+    # The hook starts in whatever directory the session opened: a project's
+    # own json.py must not run in place of the stdlib module.
+    marker = tmp_path / "imported"
+    (tmp_path / "json.py").write_text(
+        f"open({str(marker)!r}, 'w').close()\n", encoding="utf-8"
+    )
+    result = subprocess.run(
+        ["bash", str(_ROOT / "hooks" / "session-context.sh")],
+        cwd=tmp_path,
+        input=json.dumps(_AGY_PAYLOADS["SessionStart"]),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "injectSteps" in json.loads(result.stdout)
+    assert not marker.exists()
+
+
 def test_antigravity_session_start_below_floor_exits_quietly(
     python3_dir: Callable[[str], Path],
     tmp_path: Path,
