@@ -43,7 +43,10 @@ _DEFAULT = object()
 _REDISPATCH = "Discard the result and re-dispatch."
 _NO_REDISPATCH = "Do not re-dispatch"
 _STOPPED = "Sent agy SIGTERM at its init event."
-_STOPPED_EVENT = "Sent agy SIGTERM at the event the check refused."
+_STOPPED_LINE = "Sent agy SIGTERM at the line the check refused."
+_LIKELY_RECURS = (
+    "know, so a re-dispatch likely fails the same way. Discard the result."
+)
 _MAY_HAVE_RUN = "A tool call may already have run"
 _UNREADABLE = "unreadable line in stream-json output"
 # What init.tools looks like on 1.5.18: the CLI's registry, writes included.
@@ -1058,7 +1061,7 @@ def _run_bad_step_lingering(bridge: Bridge) -> None:
     stream = _stream(steps=(_BAD_STEP,), include_result=False)
     res = _run_lingering(bridge, stream)
     _assert_step_rejected(res, _BAD_STEP_MSG)
-    assert _STOPPED_EVENT in res.stderr
+    assert _STOPPED_LINE in res.stderr
     assert _STOPPED not in res.stderr
     assert "tokens unavailable; never estimate." in res.stderr
     assert (bridge.fake / "started").exists()
@@ -1122,11 +1125,8 @@ def test_unknown_event_exits_3(
     assert res.stdout == ""
     assert f"ERROR: unknown event {name} in stream-json output" in res.stderr
     assert _MAY_HAVE_RUN in res.stderr
-    assert "wrote an event this bridge does not\n" in res.stderr
-    assert (
-        "know, so a re-dispatch likely fails the same way. Discard the result."
-        in res.stderr
-    )
+    assert "wrote output this bridge does not\n" in res.stderr
+    assert _LIKELY_RECURS in res.stderr
     assert _REDISPATCH not in res.stderr
     assert _NO_REDISPATCH not in res.stderr
 
@@ -1137,7 +1137,7 @@ def test_unknown_event_stops_agy_early(bridge: Bridge) -> None:
     )
     assert res.returncode == 3, res.stderr
     assert _UNKNOWN_EVENT_MSG in res.stderr
-    assert _STOPPED_EVENT in res.stderr
+    assert _STOPPED_LINE in res.stderr
 
 
 def test_unknown_event_outranks_agys_own_status(bridge: Bridge) -> None:
@@ -1168,7 +1168,9 @@ def test_unreadable_line_exits_3(bridge: Bridge, raw: str) -> None:
     assert res.returncode == 3, res.stderr
     assert res.stdout == ""
     assert f"ERROR: {_UNREADABLE}" in res.stderr
-    assert _REDISPATCH in res.stderr
+    # Which advice follows depends on whether the watcher saw the line
+    # before the fake exited.
+    assert (_REDISPATCH in res.stderr) != (_LIKELY_RECURS in res.stderr)
 
 
 @pytest.mark.parametrize("raw", ["", "   "])
@@ -1184,10 +1186,40 @@ def test_unreadable_line_stops_agy_early(bridge: Bridge) -> None:
     assert res.returncode == 3, res.stderr
     assert res.stdout == ""
     assert f"ERROR: {_UNREADABLE}" in res.stderr
-    # verify names no KIND here: the watcher's status decides.
-    assert _STOPPED_EVENT in res.stderr
+    # verify names no KIND here: the watcher's status decides. A whole
+    # line the CLI wrote is its format, so a re-dispatch likely repeats it.
+    assert _STOPPED_LINE in res.stderr
     assert _MAY_HAVE_RUN in res.stderr
-    assert _REDISPATCH in res.stderr
+    assert _LIKELY_RECURS in res.stderr
+    assert _REDISPATCH not in res.stderr
+
+
+# Two streams whose bad step only `verify` can name, with agy exiting 7.
+# An unreadable line carries no kind, the step behind it does, and the kind
+# is what outranks agy's own status. A carriage return inside an
+# unterminated line must not split it: as two unreadable fragments it would
+# leave agy's 7 in front.
+_STEP_LINE = json.dumps({"event": "step_update", "step_update": _BAD_STEP})
+_HIDDEN_STEPS = [
+    pytest.param(
+        _with_raw("not json", include_result=False) + _STEP_LINE + "\n",
+        id="behind-an-unreadable-line",
+    ),
+    pytest.param(
+        _stream(include_result=False) + _STEP_LINE.replace(", ", ",\r", 1),
+        id="carriage-return-inside-the-line",
+    ),
+]
+
+
+@pytest.mark.parametrize("stream", _HIDDEN_STEPS)
+def test_a_bad_step_is_named_where_only_verify_can_read_it(
+    bridge: Bridge, stream: str
+) -> None:
+    (bridge.fake / "stdout").write_text(stream, encoding="utf-8")
+    (bridge.fake / "status").write_text("7\n", encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    _assert_step_rejected(res, _BAD_STEP_MSG)
 
 
 @pytest.mark.parametrize(("agy_status", "code"), [("7", 7), ("0", 3)])
@@ -1252,10 +1284,11 @@ def test_an_error_value_holding_an_equals_sign_is_printed_whole(
     assert "actual 'a=b'" in res.stderr
 
 
-def test_valid_init_is_not_stopped(bridge: Bridge) -> None:
-    (bridge.fake / "stdout").write_text(
-        _stream(include_result=False), encoding="utf-8"
-    )
+@pytest.mark.parametrize("blank_line", [False, True])
+def test_valid_init_is_not_stopped(bridge: Bridge, blank_line: bool) -> None:
+    # A blank line is skipped, by the watcher too.
+    stream = _stream(include_result=False) + "\n" * blank_line
+    (bridge.fake / "stdout").write_text(stream, encoding="utf-8")
     (bridge.fake / "linger").write_text("1\n", encoding="utf-8")
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert res.returncode == 3, res.stderr

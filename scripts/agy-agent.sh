@@ -18,10 +18,10 @@
 # every `step_update` must be a plain step (`user_input`, `system_message`,
 # `agent_response`) or a `read_file` tool step, and `result` must report
 # `status: "SUCCESS"` and a non-empty `response`. Any other event, and any
-# line that is not a JSON object, fails the run: what it reports cannot be
-# checked. A run violating any check exits 3 rather than handing back an
-# unverified answer. `init.tools` is the CLI's whole registry on 1.5.18,
-# whatever the settings say, and is not read.
+# non-blank line that is not a JSON object, fails the run: what it reports
+# cannot be checked. A run violating any check exits 3 rather than handing
+# back an unverified answer. `init.tools` is the CLI's whole registry on
+# 1.5.18, whatever the settings say, and is not read.
 #
 # `init`, every step and every other line are checked as they arrive, by a
 # watcher beside `agy`: a fault gets `agy` a SIGTERM before it does more. The
@@ -30,12 +30,13 @@
 #
 # The accepted limit: this detects and rejects, it does not prevent. On 1.5.18
 # the settings were measured to deny writes and shell commands, nothing else;
-# web search and subagent tools run whatever rule is set, and other tools were
-# not measured. A step is visible only once it has started, so the first call
-# of any tool the settings do not deny may run before the stop, a subagent's
-# own calls never appear in the stream, and rejecting the run undoes none of
-# it. Such a call can carry whatever `read_file` was able to read. Without a
-# `timeout` binary the stop is a SIGTERM with no KILL behind it.
+# web search and subagent tools ran under every deny rule tried, and other
+# tools were not measured. A step is visible only once it has started, so a
+# call of any tool the settings do not deny, and any call queued behind it,
+# may run before the stop, a subagent's own calls never appear in the stream,
+# and rejecting the run undoes none of it. Such a call can carry whatever
+# `read_file` was able to read. Without a `timeout` binary the stop is a
+# SIGTERM with no KILL behind it.
 #
 # Before dispatching, this wrapper scans the target repository for repo-local
 # executable Antigravity configs under `.agents`, `.agent`, `_agents`, `_agent`
@@ -76,9 +77,10 @@
 #        step, event or line outside what the check accepts, or no valid
 #        answer from `agy`: discard. A mismatched `init` content, an
 #        out-of-set step, an unknown event and a run the watcher stopped take
-#        precedence over `agy`'s own status. A permission mismatch or an
-#        unknown event recurs until the bridge or the CLI changes, so do not
-#        re-dispatch it; a model mismatch or an out-of-set step may not recur.
+#        precedence over `agy`'s own status. A permission mismatch recurs
+#        until the bridge or the CLI changes, so do not re-dispatch it; an
+#        unknown event or an unreadable line likely recurs too; a model
+#        mismatch or an out-of-set step may not.
 #   124  the wall-clock bound stopped the run; 137 it had to be killed
 #   128+n  this wrapper got signal n (HUP, INT, TERM) and stopped `agy`
 #   else `agy`'s own status, when `agy` itself failed
@@ -386,7 +388,7 @@ def pid_alive(pid):
 
 
 def watch(stream_path, expected_model, pid):
-    """TERM pid and exit 3 at a bad first init, 4 at a bad step or event.
+    """TERM pid; exit 3 at a bad first init, 4 at a bad step, event or line.
 
     Otherwise return once pid is gone. Lines end at a newline only. The
     watch also ends when the wrapper is gone: a signalled wrapper exits
@@ -443,7 +445,11 @@ def verify(stream_path, expected_model, msg_path):
             if not line.strip():
                 continue
             obj = parse_event(line)
-            bad_event = bad_event or event_error(obj)
+            fault = event_error(obj)
+            # The first fault stands, but one with a kind replaces an
+            # unreadable line: the kind is what outranks agy's own status.
+            if fault and (not bad_event or (fault[0] and not bad_event[0])):
+                bad_event = fault
             if obj is None:
                 continue
             ev = obj.get("event")
@@ -549,11 +555,11 @@ WATCH_STATUS=0
 	< "$INPUT_JSON" > "$STREAM_FILE" 2> "$STDERR_FILE" &
 AGY_PID=$!
 # Under `timeout`, AGY_PID is timeout's, which forwards TERM to agy. The
-# watcher exits 3 after TERMing agy at a bad init, 4 at a bad step or event,
-# and 0 once agy is gone; any other status is a crash, which loses the early
-# stop for the rest of the run: the verification below still decides the
-# outcome. It is never signalled: it ends within a poll of agy, or of this
-# wrapper.
+# watcher exits 3 after TERMing agy at a bad init, 4 at a bad step, event or
+# line, and 0 once agy is gone; any other status is a crash, which loses the
+# early stop for the rest of the run: the verification below still decides
+# the outcome. It is never signalled: it ends within a poll of agy, or of
+# this wrapper.
 python3 -I -c "$CHECK_SRC" watch "$STREAM_FILE" "$MODEL" "$AGY_PID" \
 	> /dev/null 2>&1 &
 WATCH_PID=$!
@@ -612,7 +618,7 @@ if [[ -n "$KIND" || "$WATCH_STATUS" -eq 3 || "$WATCH_STATUS" -eq 4 ]]; then
 	[[ "$WATCH_STATUS" -ne 3 ]] ||
 		DETAILS+=('Sent agy SIGTERM at its init event.')
 	[[ "$WATCH_STATUS" -ne 4 ]] ||
-		DETAILS+=('Sent agy SIGTERM at the event the check refused.')
+		DETAILS+=('Sent agy SIGTERM at the line the check refused.')
 	if [[ "$KIND" == step || "$KIND" == event || "$WATCH_STATUS" -eq 4 ]]; then
 		DETAILS+=(
 			'A tool call may already have run, and rejecting the run does not undo'
@@ -626,9 +632,11 @@ if [[ -n "$KIND" || "$WATCH_STATUS" -eq 3 || "$WATCH_STATUS" -eq 4 ]]; then
 			'so a re-dispatch fails the same way and bills again. Do not re-dispatch:'
 			'the bridge stays unavailable until it or the installed agy changes.'
 		)
-	elif [[ "$KIND" == event ]]; then
+	elif [[ "$KIND" == event || (-z "$KIND" && "$WATCH_STATUS" -eq 4) ]]; then
+		# An unknown event, or a whole line the watcher could not read:
+		# what the CLI writes, not what the model chose.
 		DETAILS+=(
-			"The installed agy ($INSTALLED_VERSION) wrote an event this bridge does not"
+			"The installed agy ($INSTALLED_VERSION) wrote output this bridge does not"
 			'know, so a re-dispatch likely fails the same way. Discard the result.'
 		)
 	else

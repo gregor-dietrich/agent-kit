@@ -164,14 +164,15 @@ in, with one marker file that covers every project:
   `AGY_AGENT_ALLOW_REPO_CONFIG=1` is set, and verifies `agy`'s
   `stream-json` events: `model` and `permission_mode` in `init`, every
   step, and `result.status` (it also reads token usage). The checks run
-  as the events arrive: the bridge stops `agy` at the first tool or
-  subagent step other than a `read_file` call, at an event it does not
+  as the events arrive: the bridge stops `agy` at the first step that is
+  neither a plain step nor a `read_file` call, at an event it does not
   know or a line it cannot read, and at a mismatched `init`, and exits 3.
   This detects and rejects, it does not prevent: on 1.5.18 the settings
   were measured to deny writes and shell commands only (web search and
-  subagent tools run regardless), so the first call of another tool may
-  run before the stop, a subagent's own calls never show in the stream,
-  and rejecting the run undoes none of it. A CLI newer than the measured
+  subagent tools ran under every deny rule tried), so a call of another
+  tool, and any call queued behind it, may run before the stop, a
+  subagent's own calls never show in the stream, and rejecting the run
+  undoes none of it. A CLI newer than the measured
   version runs with a notice; a tool call it reported in a new shape
   would pass. Residual boundary: `agy` has no `--ignore-user-config`, so
   user-level settings and MCP config still apply. Needs `agy` 1.5.18 or
