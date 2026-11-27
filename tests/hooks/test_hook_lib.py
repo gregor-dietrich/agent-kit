@@ -82,6 +82,40 @@ def test_a_quoted_command_is_an_argument() -> None:
     assert _names("grep -rn 'make test | tail' docs/") == ["grep"]
 
 
+def _multiline(text: str) -> list[tuple[str, list[str]]]:
+    return list(simple_commands(text, multiline=True))
+
+
+def test_multiline_keeps_a_quoted_argument_whole() -> None:
+    assert _multiline("tea comment 5 'a\nb'") == [
+        ("tea", ["comment", "5", "a\nb"])
+    ]
+    assert _names("tea comment 5 'a\nb'") == []
+
+
+def test_multiline_still_sees_a_command_after_the_argument() -> None:
+    assert [n for n, _ in _multiline("echo 'a\nb'\nmake test")] == [
+        "echo",
+        "make",
+    ]
+
+
+def test_multiline_backslash_newline_continues_a_line() -> None:
+    assert _multiline("make \\\ntest") == [("make", ["test"])]
+
+
+def test_multiline_apostrophes_in_comments_open_no_quote() -> None:
+    # Two comments with one apostrophe each once read as one quoted span,
+    # which hid every command between them.
+    text = "echo a # don't\nmake test\necho b # can't"
+    assert [n for n, _ in _multiline(text)] == ["echo", "make", "echo"]
+
+
+def test_multiline_unbalanced_quote_falls_back_to_physical_lines() -> None:
+    text = "echo 'unclosed\nmake test"
+    assert [n for n, _ in _multiline(text)] == ["make"]
+
+
 # --- effective_tool: runners and precommand modifiers ----------------------
 
 

@@ -30,7 +30,7 @@ setup that grows the way the original did.**
 | Component | What it is | Portability |
 | --------- | ---------- | ----------- |
 | `hooks/pipe_status_guard.py` | Denies reading a gate's exit status through a pipe (`make test \| tail`) | Any repository, either shell; gate list covers make, pytest, Maven, Gradle, npm/pnpm, cargo, go and more |
-| `hooks/tea_guard.py` | Denies a `tea` single issue/PR read without `--comments` | Gitea/`tea` only; silent everywhere else |
+| `hooks/tea_guard.py` | Denies a `tea` single issue/PR read without `--comments`, and a `tea` comment or PR write that carries a closing or reopen keyword before `#N` or text it cannot read (admits `Closes #N` lines in a PR description) | Gitea/`tea` only; silent everywhere else |
 | `hooks/decisions_status_guard.py` | An agent may draft and amend decisions-log entries but not ratify, de-ratify or delete them | Repositories with a `docs/decisions.md` in the format below; a no-op elsewhere |
 | `hooks/prune_session_tmp.py` | At Claude Code and Codex session start (`hooks/hooks.json`; not registered in Antigravity's root `hooks.json`), in a detached background child, removes Claude Code session temp dirs under `claude-<uid>` untouched for 4 days, never the current or a running session. Tracks Claude Code internals as of 2.1.310 and stops pruning silently if they move | Linux; macOS unverified (#73); inert below Python 3.10 |
 | `hooks/hook_lib.py` | Shared plumbing: payload parse, deny envelope, shell tokenizer, Claude, Codex and Antigravity path resolution | Internal |

@@ -113,7 +113,51 @@ def strip_heredocs(text: str) -> str:
     return "\n".join(out)
 
 
-def tokenize_lines(text: str) -> Iterator[list[str]]:
+def logical_lines(text: str) -> list[str]:
+    """Split *text* at the newlines that are outside quotes.
+
+    A quoted argument spanning lines stays on one logical line, so its
+    command tokenizes whole. Outside single quotes a backslash escapes the
+    next character, and a backslash-newline pair is a line continuation and
+    is removed. A ``#`` at the start of a word begins a comment that runs to
+    the end of its line, so an apostrophe in one opens no quote. A quote
+    still open at the end falls back to the physical lines, so an unbalanced
+    command behaves as it always did.
+    """
+    lines: list[str] = []
+    cur: list[str] = []
+    quote = ""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and quote != "'" and i + 1 < len(text):
+            if text[i + 1] != "\n":
+                cur.append(text[i : i + 2])
+            i += 2
+            continue
+        if quote:
+            quote = "" if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or text[i - 1].isspace()):
+            end = text.find("\n", i)
+            end = len(text) if end < 0 else end
+            cur.append(text[i:end])
+            i = end
+            continue
+        elif ch == "\n":
+            lines.append("".join(cur))
+            cur = []
+            i += 1
+            continue
+        cur.append(ch)
+        i += 1
+    return text.split("\n") if quote else [*lines, "".join(cur)]
+
+
+def tokenize_lines(
+    text: str, *, multiline: bool = False
+) -> Iterator[list[str]]:
     """Yield each line of heredoc-stripped *text* as a shell token list.
 
     Line by line, because shlex treats a newline as ordinary *whitespace*: a
@@ -122,9 +166,11 @@ def tokenize_lines(text: str) -> Iterator[list[str]]:
     IS a command separator in shell. A line that does not tokenize
     (unbalanced quotes, a quoted string spanning lines) is skipped, never
     blocked. ``punctuation_chars`` emits ``|``, ``&&``, ``;`` and friends as
-    standalone tokens.
+    standalone tokens. With *multiline*, lines are the logical lines of
+    :func:`logical_lines`, so a quoted string spanning lines tokenizes.
     """
-    for line in strip_heredocs(text).split("\n"):
+    stripped = strip_heredocs(text)
+    for line in logical_lines(stripped) if multiline else stripped.split("\n"):
         if not line.strip():
             continue
         try:
@@ -135,14 +181,16 @@ def tokenize_lines(text: str) -> Iterator[list[str]]:
             continue
 
 
-def simple_commands(text: str) -> Iterator[tuple[str, list[str]]]:
+def simple_commands(
+    text: str, *, multiline: bool = False
+) -> Iterator[tuple[str, list[str]]]:
     """Yield (command_basename, args) for each simple command in *text*.
 
     Leading ``VAR=value`` assignments are skipped, so the yielded name is
     the command word. A heredoc body is prose and is never read: a commit
     message quoting a guarded command would otherwise be read as one.
     """
-    for tokens in tokenize_lines(text):
+    for tokens in tokenize_lines(text, multiline=multiline):
         segment: list[str] = []
         segments: list[list[str]] = []
         for tok in tokens:

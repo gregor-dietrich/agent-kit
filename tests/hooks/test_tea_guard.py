@@ -12,6 +12,7 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
 from bash_hook import run_agy_command_hook, run_bash_hook
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -100,3 +101,94 @@ def test_antigravity_run_command_payload_denies_and_allows() -> None:
     assert parsed["decision"] == "deny"
     assert "--comments" in parsed["reason"]
     assert run_agy_command_hook(_HOOK, "tea issues 256 --comments") == ""
+
+
+# --- writes must not carry a closing or reopen keyword ----------------------
+
+_HEREDOC = "tea comment 5 \"$(cat <<'EOF'\n{body}\nEOF\n)\""
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'tea comment 5 "this fixes #3"',
+        'tea comments add 5 "Resolved #3"',
+        'tea comments edit 12 "reopens #3"',
+        'tea comment 5 -d "does not close #3"',
+        'tea c 5 "fix: #3"',
+        'tea comment 5 "closes owner/repo#3"',
+        "tea comment 5 'first\nthen fixes #3'",
+        'tea comment 5 "Closes #3"',
+        'tea pulls merge 5 -m "Closes #3"',
+        'tea pulls create -t "fixes #3"',
+        "tea pulls create -d x -t \"$(cat <<'EOF'\nCloses #3\nEOF\n)\"",
+        'tea pulls create -d "Closes #1\nand fixes #2"',
+        'tea pulls edit 5 --description "Closes #1, fixes #2"',
+        'tea pulls approve 5 "fixes #3"',
+        'tea pulls reject 5 "fixes #3"',
+        'tea pulls reply 5 "fixes #3"',
+        'tea pulls merge 5 -t "fixes #3"',
+        _HEREDOC.format(body="line one\nthis closes #3"),
+    ],
+)
+def test_a_closing_keyword_is_denied(command: str) -> None:
+    assert _denied(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'tea comment 5 "$(cat body.md)"',
+        'tea comment 5 "$body"',
+        "tea comment 5 `cat body.md`",
+        'tea comment 5 "$(cat <<EOF\nhello\nEOF\n)"',
+        "tea pulls create --description-file body.md",
+        "tea pulls create --description-file -",
+        "tea comment 5",
+        "cat body.md | tea comments add 5",
+    ],
+)
+def test_text_the_guard_cannot_read_is_denied(command: str) -> None:
+    assert _denied(command)
+
+
+def test_a_keyword_is_denied_through_the_antigravity_payload() -> None:
+    out = run_agy_command_hook(_HOOK, 'tea comment 5 "fixes #3"')
+    assert json.loads(out)["decision"] == "deny"
+
+
+def test_a_redirect_does_not_hide_an_index() -> None:
+    assert _denied("tea issues 2 > out.txt")
+
+
+def test_apostrophes_in_comments_do_not_hide_a_read() -> None:
+    assert _denied("echo a # don't\ntea issues 5\necho b # can't")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        'tea comment 5 "addresses #3, see #4"',
+        'tea comment 5 "hotfix #3"',
+        'tea comment 5 "fixes the parser, see #3"',
+        _HEREDOC.format(body='costs $5, `x`, "q" and it\'s fine'),
+        "tea comments list 5",
+        "tea comments add --help",
+        "tea pulls edit 5 --add-labels bug",
+        'tea pulls create --head feature -t "Title"',
+        'tea pulls create -d "a\nCloses #97\nb"',
+        'tea pulls create -d "Closes #97"',
+        'tea pulls create --description="Closes #97"',
+        'tea pulls create -d "Closes #1\nCloses #2"',
+        (
+            "tea pulls create --description \"$(cat <<'EOF'\n"
+            'Summary\n\nCloses #97\nEOF\n)"'
+        ),
+        'tea comment 5 "ok" && git log --grep "fixes #3"',
+        'git commit -m "fixes #3"',
+        "tea pulls -h 2>&1",
+        "tea issues ls 2>/dev/null",
+    ],
+)
+def test_reworded_and_unrelated_text_is_allowed(command: str) -> None:
+    assert not _denied(command)
