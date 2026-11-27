@@ -56,5 +56,5 @@ extend-select = ["E501"]
 
 [tool.vulture]
 paths = ["hooks", "tests"]
-# shlex reads it: hooks/hook_lib.py sets it on a shlex.shlex
-ignore_names = ["whitespace_split"]
+# shlex reads them: hooks/hook_lib.py sets them on a shlex.shlex
+ignore_names = ["commenters", "whitespace_split"]

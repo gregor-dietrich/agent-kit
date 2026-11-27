@@ -113,19 +113,20 @@ def strip_heredocs(text: str) -> str:
     return "\n".join(out)
 
 
-def logical_lines(text: str) -> list[str]:
+def logical_lines(text: str) -> list[str] | None:
     """Split *text* at the newlines that are outside quotes.
 
     A quoted argument spanning lines stays on one logical line, so its
     command tokenizes whole. Outside single quotes a backslash escapes the
     next character, and a backslash-newline pair is a line continuation and
-    is removed. A ``#`` at the start of a word begins a comment that runs to
-    the end of its line, so an apostrophe in one opens no quote. A heredoc
+    is removed. A ``#`` at the start of the text or after whitespace, ``;``,
+    ``&``, ``|`` or ``(`` begins a comment, which is dropped to the end of
+    its line, so an apostrophe in one opens no quote. A heredoc
     body is dropped, as :func:`strip_heredocs` drops it, but only where its
     ``<<`` stands outside quotes: quoted, it is text (``"cout << x"``), and
     reading it as a heredoc swallowed the rest of the command. A quote still
-    open at the end falls back to the heredoc-stripped physical lines, so an
-    unbalanced command behaves as it always did.
+    open at the end returns None: the caller falls back to the physical
+    lines, so an unbalanced command behaves as it always did.
     """
     lines: list[str] = []
     cur: list[str] = []
@@ -143,11 +144,9 @@ def logical_lines(text: str) -> list[str]:
             quote = "" if ch == quote else quote
         elif ch in "'\"":
             quote = ch
-        elif ch == "#" and (i == 0 or text[i - 1].isspace()):
+        elif ch == "#" and (i == 0 or text[i - 1] in " \t\n;&|("):
             end = text.find("\n", i)
-            end = len(text) if end < 0 else end
-            cur.append(text[i:end])
-            i = end
+            i = len(text) if end < 0 else end
             continue
         elif m := _HEREDOC_START.match(text, i):
             delims.append(m[1].strip("\"'"))
@@ -169,9 +168,7 @@ def logical_lines(text: str) -> list[str]:
             continue
         cur.append(ch)
         i += 1
-    if quote:
-        return strip_heredocs(text).split("\n")
-    return [*lines, "".join(cur)]
+    return None if quote else [*lines, "".join(cur)]
 
 
 def tokenize_lines(
@@ -186,17 +183,21 @@ def tokenize_lines(
     (unbalanced quotes, a quoted string spanning lines) is skipped, never
     blocked. ``punctuation_chars`` emits ``|``, ``&&``, ``;`` and friends as
     standalone tokens. With *multiline*, lines are the logical lines of
-    :func:`logical_lines`, so a quoted string spanning lines tokenizes.
+    :func:`logical_lines`, so a quoted string spanning lines tokenizes; its
+    comments are already gone, so shlex is told of none: left to itself it
+    reads a ``#`` inside a word (``owner/repo#3``) as a comment start, which
+    the shell does not.
     """
-    lines = (
-        logical_lines(text) if multiline else strip_heredocs(text).split("\n")
-    )
+    logical = logical_lines(text) if multiline else None
+    lines = strip_heredocs(text).split("\n") if logical is None else logical
     for line in lines:
         if not line.strip():
             continue
         try:
             lex = shlex.shlex(line, posix=True, punctuation_chars=True)
             lex.whitespace_split = True
+            if logical is not None:
+                lex.commenters = ""
             yield list(lex)
         except ValueError:
             continue

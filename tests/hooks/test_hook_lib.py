@@ -107,8 +107,15 @@ def test_multiline_backslash_newline_continues_a_line() -> None:
 def test_multiline_apostrophes_in_comments_open_no_quote() -> None:
     # Two comments with one apostrophe each once read as one quoted span,
     # which hid every command between them.
-    text = "echo a # don't\nmake test\necho b # can't"
-    assert [n for n, _ in _multiline(text)] == ["echo", "make", "echo"]
+    text = "echo a # don't\nmake test\ncd x;# can't\necho b"
+    assert [n for n, _ in _multiline(text)] == ["echo", "make", "cd", "echo"]
+
+
+def test_multiline_keeps_a_hash_inside_a_word() -> None:
+    # shlex alone reads `owner/repo#3` as `owner/repo` plus a comment.
+    assert _multiline("tea comment 5 see owner/repo#3 now") == [
+        ("tea", ["comment", "5", "see", "owner/repo#3", "now"])
+    ]
 
 
 def test_multiline_reads_a_quoted_heredoc_operator_as_text() -> None:
