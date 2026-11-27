@@ -27,7 +27,8 @@
 # settings deny writes and shell commands, but web search and subagent tools
 # cannot be denied by settings on 1.5.18, so such a call is detected at its
 # `ACTIVE` line and the run rejected, after the call may have started. An
-# event the bridge does not know is ignored.
+# event other than `init`, `step_update` and `result` rejects the run too:
+# what it reports cannot be checked.
 #
 # Before dispatching, this wrapper scans the target repository for repo-local
 # executable Antigravity configs under `.agents`, `.agent`, `_agents`, `_agent`
@@ -64,13 +65,13 @@
 #   2    usage error, failed precondition, user not opted in, repo-local
 #        configs refused, or a pin key missing/malformed; `agy` did not run
 #   3    the pin could not be verified (`init` absent, duplicated or
-#        mismatched), permissions were unexpected, a step was outside the
-#        read-only set, or `agy` returned no valid answer: discard. A
-#        mismatched `init` content, an out-of-set step, and a run the
-#        watcher stopped, take precedence over `agy`'s own status. A
-#        permission mismatch recurs until the bridge or the CLI changes, so
-#        do not re-dispatch it; a model mismatch or an out-of-set step may
-#        not.
+#        mismatched), permissions were unexpected, a step or an event was
+#        outside the read-only set, or `agy` returned no valid answer:
+#        discard. A mismatched `init` content, an out-of-set step or event,
+#        and a run the watcher stopped, take precedence over `agy`'s own
+#        status. A permission mismatch recurs until the bridge or the CLI
+#        changes, so do not re-dispatch it; a model mismatch or an out-of-set
+#        step may not.
 #   124  the wall-clock bound stopped the run; 137 it had to be killed
 #   128+n  this wrapper got signal n (HUP, INT, TERM) and stopped `agy`
 #   else `agy`'s own status, when `agy` itself failed
@@ -306,6 +307,7 @@ import time
 # Tuples: `in` then compares, and never raises on an unhashable JSON value.
 ALLOWED_TOOLS = ("read_file",)
 PLAIN_STEPS = ("user_input", "system_message", "agent_response")
+EVENTS = ("init", "step_update", "result")
 
 
 def parse_event(line):
@@ -351,6 +353,15 @@ def step_error(step):
     )
 
 
+def event_error(obj):
+    """(kind, message) for an event outside the read-only set, else None."""
+    ev = obj.get("event")
+    if ev not in EVENTS:
+        return "event", f"unknown event {ev!r} in stream-json output"
+    message = ev == "step_update" and step_error(obj.get("step_update"))
+    return ("step", message) if message else None
+
+
 def pid_alive(pid):
     try:
         os.kill(pid, 0)
@@ -364,7 +375,7 @@ def pid_alive(pid):
 
 
 def watch(stream_path, expected_model, pid):
-    """TERM pid and exit 3 at a bad first init, 4 at a bad step.
+    """TERM pid and exit 3 at a bad first init, 4 at a bad step or event.
 
     Otherwise return once pid is gone. Lines end at a newline only;
     `verify` also splits at a bare carriage return, so a stream using
@@ -389,19 +400,16 @@ def watch(stream_path, expected_model, pid):
             obj = parse_event(line.decode("utf-8", errors="replace"))
             if obj is None:
                 continue
-            ev = obj.get("event")
-            if ev == "init" and not seen:
+            if obj.get("event") == "init" and not seen:
                 seen = True
                 init = obj.get("init")
                 bad = isinstance(init, dict) and init_error(
                     init, expected_model
                 )
                 code = 3
-            elif ev == "step_update":
-                bad = step_error(obj.get("step_update"))
-                code = 4
             else:
-                continue
+                bad = event_error(obj)
+                code = 4
             if bad:
                 try:
                     os.kill(pid, signal.SIGTERM)
@@ -417,19 +425,18 @@ def verify(stream_path, expected_model, msg_path):
     result_obj = None
     result_count = 0
     bad_result_status = None
-    bad_step = None
+    bad_event = None
     with open(stream_path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             obj = parse_event(line)
             if obj is None:
                 continue
             ev = obj.get("event")
+            bad_event = bad_event or event_error(obj)
             if ev == "init":
                 init_count += 1
                 if init_obj is None and isinstance(obj.get("init"), dict):
                     init_obj = obj["init"]
-            elif ev == "step_update" and bad_step is None:
-                bad_step = step_error(obj.get("step_update"))
             elif ev == "result":
                 result_count += 1
                 res = obj.get("result")
@@ -464,9 +471,9 @@ def verify(stream_path, expected_model, msg_path):
         print(f"KIND={mismatch[0]}")
         sys.exit(3)
 
-    if bad_step is not None:
-        print(f"ERR={bad_step}")
-        print("KIND=step")
+    if bad_event is not None:
+        print(f"ERR={bad_event[1]}")
+        print(f"KIND={bad_event[0]}")
         sys.exit(3)
 
     if result_count == 0 or result_obj is None:
@@ -531,10 +538,10 @@ WATCH_STATUS=0
 	< "$INPUT_JSON" > "$STREAM_FILE" 2> "$STDERR_FILE" &
 AGY_PID=$!
 # Under `timeout`, AGY_PID is timeout's, which forwards TERM to agy. The
-# watcher exits 3 after TERMing agy at a bad init, 4 at a bad step, and 0 once
-# agy is gone; any other status is a crash, which changes nothing: the
-# verification below decides. It is never signalled: it ends within a poll
-# of agy, or of this wrapper.
+# watcher exits 3 after TERMing agy at a bad init, 4 at a bad step or event,
+# and 0 once agy is gone; any other status is a crash, which changes nothing:
+# the verification below decides. It is never signalled: it ends within a
+# poll of agy, or of this wrapper.
 python3 -I -c "$CHECK_SRC" watch "$STREAM_FILE" "$MODEL" "$AGY_PID" \
 	> /dev/null 2>&1 &
 WATCH_PID=$!
@@ -576,17 +583,16 @@ else
 	printf 'tokens unavailable; never estimate.\n' >&2
 fi
 
-# An init content mismatch or an out-of-set step outranks agy's own status (a
-# TERMed agy exits non-zero) and does not depend on whether the watcher saw it
-# first.
+# A fault that carries a KIND (init content, an out-of-set step or event)
+# outranks agy's own status (a TERMed agy exits non-zero) and does not depend
+# on whether the watcher saw it first.
 KIND="$(field KIND)"
-if [[ "$KIND" == init || "$KIND" == pin || "$KIND" == step ||
-	"$WATCH_STATUS" -eq 3 || "$WATCH_STATUS" -eq 4 ]]; then
+if [[ -n "$KIND" || "$WATCH_STATUS" -eq 3 || "$WATCH_STATUS" -eq 4 ]]; then
 	DETAILS=()
 	[[ "$WATCH_STATUS" -ne 3 ]] ||
 		DETAILS+=('Sent agy SIGTERM at its init event.')
 	[[ "$WATCH_STATUS" -ne 4 ]] ||
-		DETAILS+=('Sent agy SIGTERM at a step outside the read-only set.')
+		DETAILS+=('Sent agy SIGTERM at an event outside the read-only set.')
 	if [[ "$KIND" == init ]]; then
 		# Deterministic for the installed agy: say so.
 		DETAILS+=(

@@ -43,7 +43,7 @@ _DEFAULT = object()
 _REDISPATCH = "Discard the result and re-dispatch."
 _NO_REDISPATCH = "Do not re-dispatch"
 _STOPPED = "Sent agy SIGTERM at its init event."
-_STOPPED_STEP = "Sent agy SIGTERM at a step outside the read-only set."
+_STOPPED_STEP = "Sent agy SIGTERM at an event outside the read-only set."
 _MAY_HAVE_RUN = "The call may already have run"
 # What init.tools looks like on 1.5.18: the CLI's registry, writes included.
 _REGISTRY = ["ask_permission", "run_command", "write_file", "search_web"]
@@ -1099,6 +1099,51 @@ def test_unterminated_bad_step_is_caught_by_final_verification(
     _assert_step_rejected(res, _BAD_STEP_MSG)
     assert "Sent agy SIGTERM" not in res.stderr
     assert "agy exited 7" not in res.stderr
+
+
+_UNKNOWN_EVENT = {"event": "tool_call", "tool_call": {"name": "search_web"}}
+_UNKNOWN_EVENT_MSG = "ERROR: unknown event 'tool_call' in stream-json output"
+
+
+def _with_event(event: object, include_result: bool = True) -> str:
+    """The default stream with one more event after its init."""
+    init, *rest = _stream(include_result=include_result).splitlines()
+    return "\n".join([init, json.dumps(event), *rest]) + "\n"
+
+
+@pytest.mark.parametrize(
+    "event, name",
+    [(_UNKNOWN_EVENT, "'tool_call'"), ({"note": "no event key"}, "None")],
+)
+def test_unknown_event_exits_3(
+    bridge: Bridge, event: object, name: str
+) -> None:
+    (bridge.fake / "stdout").write_text(_with_event(event), "utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 3, res.stderr
+    assert res.stdout == ""
+    assert f"ERROR: unknown event {name} in stream-json output" in res.stderr
+    assert _REDISPATCH in res.stderr
+    assert _MAY_HAVE_RUN not in res.stderr
+    assert _NO_REDISPATCH not in res.stderr
+
+
+def test_unknown_event_stops_agy_early(bridge: Bridge) -> None:
+    res = _run_lingering(bridge, _with_event(_UNKNOWN_EVENT, False))
+    assert res.returncode == 3, res.stderr
+    assert _UNKNOWN_EVENT_MSG in res.stderr
+    assert _STOPPED_STEP in res.stderr
+
+
+def test_unknown_event_outranks_agys_own_status(bridge: Bridge) -> None:
+    # No newline: only `verify` sees the event, and agy exits 7 by itself.
+    stream = _with_event(_UNKNOWN_EVENT, False).rstrip("\n")
+    (bridge.fake / "stdout").write_text(stream, encoding="utf-8")
+    (bridge.fake / "status").write_text("7\n", encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 3, res.stderr
+    assert _UNKNOWN_EVENT_MSG in res.stderr
+    assert "Sent agy SIGTERM" not in res.stderr
 
 
 def test_an_error_value_holding_an_equals_sign_is_printed_whole(
