@@ -31,7 +31,7 @@ that can break silently.
   any payload they cannot parse. Never block a call you cannot read.
   They run under the user's `python3`, not the 3.13 test venv, so hook
   code stays within `hook_lib.FLOOR` (3.10); below it every guard denies,
-  naming the floor, and a SessionStart hook, which has no call to
+  naming the floor, and the pruner, a SessionStart hook with no call to
   refuse, exits quietly.
   A call a guard _has_ read, that targets what it protects but whose
   effect it cannot model (a patch it cannot simulate, an Edit whose
