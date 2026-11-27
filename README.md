@@ -96,10 +96,23 @@ Claude Code — configure the marketplace per machine in
 ```
 
 Update with `claude plugin marketplace update agent-kit` (followed by
-`claude plugin update agent-kit@agent-kit` if auto-update is off). Avoid
-bare `claude plugin marketplace add <url>`: that subcommand accepts no
-`--ref` flag and tracks `main`, which caches unreleased commits under
-the previous release's version.
+`claude plugin update agent-kit@agent-kit` if auto-update is off).
+`claude plugin marketplace add` is no route to a release: it accepts no
+`--ref` flag, so a source it takes tracks `main` and caches unreleased
+commits under the previous release's version, and it rejects this
+`ssh://` URL as an invalid source format (Claude Code 2.1.332).
+
+A machine that registered the marketplace without the ref tracks `main`
+and needs the ref in two places. Added to `settings.json` alone, it
+leaves the registered source and the settings entry in disagreement:
+Claude Code ignores the marketplace, `claude plugin list` reports
+agent-kit as failed to load, and no guard runs, with nothing inside a
+session saying so. Add the same `"ref": "release"` to the `source` of
+the `agent-kit` entry in `~/.claude/plugins/known_marketplaces.json`,
+run `claude plugin marketplace update agent-kit`, and check that
+`claude plugin list` shows the plugin enabled. That switch was measured
+on Claude Code 2.1.332; whether a new session repairs the disagreement
+by itself was not.
 
 Codex reads the same marketplace file and `hooks/hooks.json`; pin it to
 `release`:

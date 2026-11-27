@@ -140,9 +140,11 @@ that can break silently.
 
 ## Releasing
 
-Only the maintainer cuts a release; agents never bump `version`, write
-release entries in `CHANGELOG.md`, tag releases or push `release`. Tags
-are never moved or reused; fix a broken release with a new patch release.
+Only the maintainer cuts a release. An agent prepares the release pull
+request of step 2, its `version` bump and its `CHANGELOG.md` entry, only
+when the maintainer asks for that release, and never tags a release or
+pushes `release`. Tags are never moved or reused; fix a broken release
+with a new patch release.
 Follow the snippet below rather than `make tag`: release tags are signed
 with a dedicated SSH release key (`~/.ssh/id_agent_kit`, overridable via
 `AGENT_KIT_RELEASE_KEY`), not the ambient git signing key.
