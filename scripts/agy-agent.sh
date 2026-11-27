@@ -20,8 +20,9 @@
 # `result` must report `status: "SUCCESS"` and a non-empty `response`. A run
 # violating any check exits 3 rather than handing back an unverified answer.
 # The `init` content is checked as it arrives, by a watcher beside `agy`: a
-# mismatch stops `agy` (SIGTERM) before it spends more, and the same checks
-# run again over the whole stream once `agy` has exited.
+# mismatch stops `agy` with SIGTERM before it spends more. The checks always
+# run again over the whole stream once `agy` has exited, whatever the watcher
+# saw, and that run alone decides the outcome.
 #
 # Before dispatching, this wrapper scans the target repository for repo-local
 # executable Antigravity configs under `.agents`, `.agent`, `_agents`, `_agent`
@@ -38,7 +39,8 @@
 # vendor. It lives outside every checkout, so no branch can grant it.
 #
 # The stream-json `init`, `result` and `usage` shapes parsed below were
-# measured on Antigravity CLI 1.5.16, which is the floor.
+# measured on the Antigravity CLI version named by MEASURED_VERSION below;
+# MIN_VERSION is the floor.
 #
 # Usage:
 #   agy-agent.sh <role> <prompt-file> [<transcript-file>]
@@ -58,8 +60,10 @@
 #        configs refused, or a pin key missing/malformed; `agy` did not run
 #   3    the pin could not be verified (`init` absent, duplicated or
 #        mismatched), permissions or tools were unexpected, or `agy` returned
-#        no valid answer: discard. A mismatched `init` content stops `agy` at
-#        once, and re-dispatching fails the same way.
+#        no valid answer: discard. A mismatched `init` content takes
+#        precedence over `agy`'s own status and stops `agy` at once. A
+#        permission or tools mismatch recurs until the bridge or the CLI
+#        changes, so do not re-dispatch it; a model mismatch may not.
 #   124  the wall-clock bound stopped the run; 137 it had to be killed
 #   128+n  this wrapper got signal n (HUP, INT, TERM) and stopped `agy`
 #   else `agy`'s own status, when `agy` itself failed
@@ -206,32 +210,30 @@ command -v python3 > /dev/null 2>&1 ||
 # runs, with a notice.
 INSTALLED_VERSION="$(agy --version 2> /dev/null | awk 'NF { print; exit }' || true)"
 VERSION_RE='^([0-9]+)\.([0-9]+)\.([0-9]+)([^0-9].*)?$'
-# older_than <ref> <major> <minor> <patch>: true when the version given as
-# three components is older than <ref>.
+# older_than <a> <b>: true when dotted version <a> is older than <b>.
 older_than() {
 	local -a have want
 	local i
-	IFS=. read -r -a want <<< "$1"
-	shift
-	have=("$1" "$2" "$3")
+	IFS=. read -r -a have <<< "$1"
+	IFS=. read -r -a want <<< "$2"
 	for i in 0 1 2; do
 		((10#${have[i]} > 10#${want[i]})) && return 1
 		((10#${have[i]} < 10#${want[i]})) && return 0
 	done
 	return 1
 }
-if [[ ! "$INSTALLED_VERSION" =~ $VERSION_RE ]] ||
-	older_than "$MIN_VERSION" "${BASH_REMATCH[@]:1:3}"; then
+INSTALLED_CORE=""
+if [[ "$INSTALLED_VERSION" =~ $VERSION_RE ]]; then
+	INSTALLED_CORE="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+fi
+if [[ -z "$INSTALLED_CORE" ]] || older_than "$INSTALLED_CORE" "$MIN_VERSION"; then
 	die "agy reports \"$INSTALLED_VERSION\"; this wrapper needs" \
 		"agy >= $MIN_VERSION. Upgrade Antigravity CLI."
 fi
-# BASH_REMATCH still holds the installed version's components from above.
-IFS=. read -r -a MEASURED_PARTS <<< "$MEASURED_VERSION"
-if older_than "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}" \
-	"${MEASURED_PARTS[@]}"; then
+if older_than "$MEASURED_VERSION" "$INSTALLED_CORE"; then
 	printf 'NOTE: agy %s is newer than %s, the newest version this\n' \
 		"$INSTALLED_VERSION" "$MEASURED_VERSION" >&2
-	printf '  bridge was measured on. If its init event changed, the run stops at init with exit 3.\n' >&2
+	printf '  bridge was measured on; the run may fail verification.\n' >&2
 fi
 
 TIMEOUT_BIN=""
@@ -251,10 +253,14 @@ umask 077
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/agy-agent.XXXXXX")"
 trap 'rm -rf -- "$WORKDIR"' EXIT
 AGY_PID=""
-WATCH_PID=""
+AGY_WAITED=""
+# A signal stops agy too, rather than orphaning it, unless it was already
+# waited for (its pid may be reused). `$!` is set the moment the launch below
+# returns, before any trap can run, so in the window before AGY_PID is
+# assigned no signal finds agy started but unknown (as in codex-agent.sh).
 stop() {
-	[[ -z "$WATCH_PID" ]] || kill -TERM "$WATCH_PID" 2> /dev/null || true
-	[[ -z "$AGY_PID" ]] || kill -TERM "$AGY_PID" 2> /dev/null || true
+	local pid="${AGY_PID:-${!:-}}"
+	[[ -n "$AGY_WAITED" || -z "$pid" ]] || kill -TERM "$pid" 2> /dev/null || true
 	exit $((128 + $1))
 }
 trap 'stop 1' HUP
@@ -264,11 +270,9 @@ trap 'stop 15' TERM
 STREAM_FILE="${TRANSCRIPT:-$WORKDIR/stream.jsonl}"
 STDERR_FILE="$WORKDIR/stderr"
 MESSAGE_FILE="$WORKDIR/message"
-CHECK_PY="$WORKDIR/check.py"
-VERDICT_FILE="$WORKDIR/verdict"
 INPUT_JSON="$WORKDIR/input.jsonl"
 
-python3 -c '
+python3 -I -c '
 import json, sys
 preamble, prompt_path, out_path = sys.argv[1:4]
 with open(prompt_path, encoding="utf-8", errors="replace") as fh:
@@ -280,8 +284,10 @@ with open(out_path, "w", encoding="utf-8") as out:
 	die "failed to encode prompt file: $PROMPT_FILE"
 
 # One program for both uses, so the init checks exist once: `watch` stops agy
-# at a bad init event, `verify` checks the whole finished stream.
-cat > "$CHECK_PY" << 'PY'
+# at a bad init event, `verify` checks the whole finished stream. It is kept
+# in a variable and run with `python3 -I -c`, so nothing the wrapper executes
+# is ever written under WORKDIR.
+IFS= read -r -d '' CHECK_SRC << 'PY' || true
 import json
 import os
 import signal
@@ -300,24 +306,26 @@ ALLOWED_TOOLS = {
 def parse_event(line):
     try:
         obj = json.loads(line.strip())
-    except ValueError:
+    except json.JSONDecodeError:
         return None
     return obj if isinstance(obj, dict) else None
 
 
 def init_error(init, expected_model):
-    """The message for an init content mismatch, or None when it is fine."""
+    """(kind, message) for an init content mismatch, None when it is fine."""
     model = init.get("model")
     if model != expected_model:
         return (
+            "pin",
             f"pin mismatch on model: expected {expected_model!r}, "
-            f"actual {model!r}"
+            f"actual {model!r}",
         )
     perm_mode = init.get("permission_mode")
     if perm_mode != "request-review":
         return (
+            "init",
             f"unexpected permission_mode {perm_mode!r}; "
-            "expected 'request-review'"
+            "expected 'request-review'",
         )
     tools = init.get("tools")
     if (
@@ -325,7 +333,7 @@ def init_error(init, expected_model):
         or not tools
         or not all(isinstance(t, str) and t in ALLOWED_TOOLS for t in tools)
     ):
-        return f"unexpected tools in init event: {tools!r}"
+        return "init", f"unexpected tools in init event: {tools!r}"
     return None
 
 
@@ -335,44 +343,41 @@ def pid_alive(pid):
     except ProcessLookupError:
         return False
     except OSError:
+        # EPERM: the process exists but is not ours to signal. Only "no such
+        # process" proves it is gone; anything else must not end the watch.
         pass
     return True
 
 
-def watch(stream_path, expected_model, pid, verdict_path):
+def watch(stream_path, expected_model, pid):
+    """Exit 3 after TERMing pid on a bad first init, else 0 once pid is gone."""
     pos = 0
     buf = b""
-    while True:
-        alive = pid_alive(pid)
-        try:
-            with open(stream_path, "rb") as fh:
-                fh.seek(pos)
-                chunk = fh.read()
-        except OSError:
-            chunk = b""
-        pos += len(chunk)
-        *lines, buf = (buf + chunk).split(b"\n")
-        for line in lines:
-            obj = parse_event(line.decode("utf-8", errors="replace"))
-            if obj is None or obj.get("event") != "init":
-                continue
-            init = obj.get("init")
-            if not isinstance(init, dict):
-                return
-            msg = init_error(init, expected_model)
-            if msg is not None:
-                tmp = verdict_path + ".tmp"
-                with open(tmp, "w", encoding="utf-8") as out:
-                    out.write(f"ERR={msg}\nKIND=init\n")
-                os.replace(tmp, verdict_path)
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except OSError:
-                    pass
-            return
-        if not alive:
-            return
-        time.sleep(0.1)
+    seen = False
+    while pid_alive(pid):
+        if not seen:
+            try:
+                with open(stream_path, "rb") as fh:
+                    fh.seek(pos)
+                    chunk = fh.read()
+            except OSError:
+                chunk = b""
+            pos += len(chunk)
+            *lines, buf = (buf + chunk).split(b"\n")
+            for line in lines:
+                obj = parse_event(line.decode("utf-8", errors="replace"))
+                if obj is None or obj.get("event") != "init":
+                    continue
+                seen = True
+                init = obj.get("init")
+                if isinstance(init, dict) and init_error(init, expected_model):
+                    try:
+                        os.kill(pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        return
+                    sys.exit(3)
+                break
+        time.sleep(0.5 if seen else 0.1)
 
 
 def verify(stream_path, expected_model, msg_path):
@@ -419,10 +424,10 @@ def verify(stream_path, expected_model, msg_path):
         print(f"ERR=unexpected init event count: {init_count}; expected 1")
         sys.exit(3)
 
-    msg = init_error(init_obj, expected_model)
-    if msg is not None:
-        print(f"ERR={msg}")
-        print("KIND=init")
+    mismatch = init_error(init_obj, expected_model)
+    if mismatch is not None:
+        print(f"ERR={mismatch[1]}")
+        print(f"KIND={mismatch[0]}")
         sys.exit(3)
 
     if result_count == 0 or result_obj is None:
@@ -451,10 +456,13 @@ def verify(stream_path, expected_model, msg_path):
         out.write(response)
 
 
-if sys.argv[1] == "watch":
-    watch(sys.argv[2], sys.argv[3], int(sys.argv[4]), sys.argv[5])
-else:
+cmd = sys.argv[1:2]
+if cmd == ["watch"] and len(sys.argv) == 5:
+    watch(sys.argv[2], sys.argv[3], int(sys.argv[4]))
+elif cmd == ["verify"] and len(sys.argv) == 5:
     verify(*sys.argv[2:5])
+else:
+    sys.exit(2)
 PY
 
 # Created now, after every cheap refusal and before anything is spent.
@@ -472,6 +480,7 @@ fi
 
 cd -- "$ROOT"
 STATUS=0
+WATCH_STATUS=0
 "${AGY_CMD[@]}" \
 	--input-format stream-json \
 	--output-format stream-json \
@@ -482,15 +491,16 @@ STATUS=0
 	--settings "$SETTINGS" \
 	< "$INPUT_JSON" > "$STREAM_FILE" 2> "$STDERR_FILE" &
 AGY_PID=$!
-# Under `timeout`, AGY_PID is timeout's, which forwards TERM to agy. A watcher
-# that fails changes nothing: the verification below still decides.
-python3 -I "$CHECK_PY" watch "$STREAM_FILE" "$MODEL" "$AGY_PID" \
-	"$VERDICT_FILE" > /dev/null 2>&1 &
+# Under `timeout`, AGY_PID is timeout's, which forwards TERM to agy. The
+# watcher exits 3 after TERMing agy, and 0 once agy is gone; any other status
+# is a crash, which changes nothing: the verification below decides. It
+# outlives no one and is never signalled: it ends within a poll of agy.
+python3 -I -c "$CHECK_SRC" watch "$STREAM_FILE" "$MODEL" "$AGY_PID" \
+	> /dev/null 2>&1 &
 WATCH_PID=$!
-wait "$AGY_PID" 2> /dev/null || STATUS=$?
-kill -TERM "$WATCH_PID" 2> /dev/null || true
-wait "$WATCH_PID" 2> /dev/null || true
-WATCH_PID=""
+wait "$AGY_PID" || STATUS=$?
+AGY_WAITED=1
+wait "$WATCH_PID" || WATCH_STATUS=$?
 
 fail() {
 	local status="$1"
@@ -507,34 +517,42 @@ fail() {
 	exit "$status"
 }
 
-# An init content mismatch is deterministic for the installed agy: say so.
-# Any arguments after the message are extra detail lines placed first.
-init_mismatch() {
-	local msg="$1"
-	shift
-	fail 3 "$msg" "$@" \
-		"The installed agy ($INSTALLED_VERSION) reports this in its init event," \
-		'so a re-dispatch fails the same way and bills again. Do not re-dispatch:' \
-		'the bridge stays unavailable until it or the installed agy changes.'
+# The value of KEY= in the verify output; the value may itself contain `=`.
+field() {
+	awk -v key="$1" '
+		index($0, key "=") == 1 { print substr($0, length(key) + 2); exit }
+	' "$VERIFY_OUT"
 }
-
-# The watcher's verdict wins over agy's own status: a TERMed agy exits non-zero.
-if [[ -s "$VERDICT_FILE" ]]; then
-	ERR_MSG="$(awk -F= '$1 == "ERR" { sub(/^ERR=/, ""); print; exit }' "$VERDICT_FILE")"
-	init_mismatch "${ERR_MSG:-the init event did not verify against $ROLE_FILE}" \
-		'Stopped agy at its init event; it produced no answer.'
-fi
 
 VERIFY_OUT="$WORKDIR/verify"
 VERIFY_STATUS=0
-python3 -I "$CHECK_PY" verify "$STREAM_FILE" "$MODEL" "$MESSAGE_FILE" \
+python3 -I -c "$CHECK_SRC" verify "$STREAM_FILE" "$MODEL" "$MESSAGE_FILE" \
 	> "$VERIFY_OUT" || VERIFY_STATUS=$?
 
-TOKENS="$(awk -F= '$1 == "TOKENS" { print $2; exit }' "$VERIFY_OUT")"
+TOKENS="$(field TOKENS)"
 if [[ "$TOKENS" =~ ^[0-9]+$ ]]; then
 	printf 'tokens used (normalised): %s\n' "$TOKENS" >&2
 else
 	printf 'tokens unavailable; never estimate.\n' >&2
+fi
+
+# An init content mismatch outranks agy's own status (a TERMed agy exits
+# non-zero) and does not depend on whether the watcher saw it first.
+KIND="$(field KIND)"
+if [[ "$KIND" == init || "$KIND" == pin ]]; then
+	DETAILS=()
+	[[ "$WATCH_STATUS" -ne 3 ]] || DETAILS+=('Stopped agy at its init event.')
+	if [[ "$KIND" == init ]]; then
+		# Deterministic for the installed agy: say so.
+		DETAILS+=(
+			"The installed agy ($INSTALLED_VERSION) reports this in its init event,"
+			'so a re-dispatch fails the same way and bills again. Do not re-dispatch:'
+			'the bridge stays unavailable until it or the installed agy changes.'
+		)
+	else
+		DETAILS+=('Discard the result and re-dispatch.')
+	fi
+	fail 3 "$(field ERR)" "${DETAILS[@]}"
 fi
 
 if [[ -n "$TIMEOUT_BIN" ]] && ((STATUS == 124 || STATUS == 137)); then
@@ -546,12 +564,9 @@ fi
 [[ "$STATUS" -eq 0 ]] || fail "$STATUS" "agy exited $STATUS."
 
 if [[ "$VERIFY_STATUS" -ne 0 ]]; then
-	ERR_MSG="$(awk -F= '$1 == "ERR" { sub(/^ERR=/, ""); print; exit }' "$VERIFY_OUT")"
-	ERR_MSG="${ERR_MSG:-the run did not verify against $ROLE_FILE}"
-	if [[ "$(awk -F= '$1 == "KIND" { print $2; exit }' "$VERIFY_OUT")" == init ]]; then
-		init_mismatch "$ERR_MSG"
-	fi
-	fail 3 "$ERR_MSG" 'Discard the result and re-dispatch.'
+	ERR_MSG="$(field ERR)"
+	fail 3 "${ERR_MSG:-the run did not verify against $ROLE_FILE}" \
+		'Discard the result and re-dispatch.'
 fi
 
 printf 'Pin verified from the stream-json init event.\n' >&2

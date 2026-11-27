@@ -42,28 +42,35 @@ _PROMPT = "Review the diff.\n"
 _DEFAULT = object()
 _REDISPATCH = "Discard the result and re-dispatch."
 _NO_REDISPATCH = "Do not re-dispatch"
+_STOPPED = "Stopped agy at its init event."
 
-_FAKE_AGY = """#!{bash}
+# `linger` holds a sleep length: the fake then stays up that long and stops on
+# TERM, taking its sleep with it. `split` writes stdout in two halves.
+_FAKE_AGY = """#!@BASH@
 d="$FAKE_AGY_DIR"
 printf '%s\\n' "$*" >> "$d/calls"
 if [ "$1" = --version ]; then cat "$d/version"; exit 0; fi
 printf '%s\\0' "$@" > "$d/argv"
 pwd -P > "$d/cwd"
 cat > "$d/stdin"
-if [ -f "$d/sleep" ]; then
-    : > "$d/started"
-    sleep "$(cat "$d/sleep")"
-    : > "$d/survived"
-    exit 0
-fi
-cat "$d/stdout"
-if [ -f "$d/linger" ]; then
-    : > "$d/started"
-    sleep "$(cat "$d/linger")"
-    : > "$d/survived"
-    exit 0
-fi
 [ -f "$d/stderr" ] && cat "$d/stderr" >&2
+if [ -f "$d/split" ]; then
+    out=$(cat "$d/stdout")
+    half=$(( ${#out} / 2 ))
+    printf '%s' "${out:0:half}"
+    sleep 0.5
+    printf '%s\\n' "${out:half}"
+else
+    cat "$d/stdout"
+fi
+if [ -f "$d/linger" ]; then
+    trap 'kill $!; exit 143' TERM
+    : > "$d/started"
+    sleep "$(cat "$d/linger")" &
+    wait $!
+    : > "$d/survived"
+    exit 0
+fi
 exit "$(cat "$d/status")"
 """
 
@@ -205,7 +212,7 @@ def bridge(tmp_path: Path) -> Bridge:
 
     agy_bin = bin_dir / "agy"
     agy_bin.write_text(
-        _FAKE_AGY.format(bash=shutil.which("bash")), encoding="utf-8"
+        _FAKE_AGY.replace("@BASH@", str(shutil.which("bash"))), encoding="utf-8"
     )
     agy_bin.chmod(agy_bin.stat().st_mode | stat.S_IXUSR)
 
@@ -465,8 +472,26 @@ def test_model_mismatch_exits_3_and_discards_response(bridge: Bridge) -> None:
     assert res.returncode == 3
     assert res.stdout == ""
     assert "pin mismatch on model" in res.stderr
-    assert _NO_REDISPATCH in res.stderr
-    assert _REDISPATCH not in res.stderr
+    assert _REDISPATCH in res.stderr
+    assert _NO_REDISPATCH not in res.stderr
+
+
+def test_model_mismatch_stops_agy_early_and_may_be_redispatched(
+    bridge: Bridge,
+) -> None:
+    (bridge.fake / "stdout").write_text(
+        _stream(model="gemini-wrong", include_result=False), encoding="utf-8"
+    )
+    (bridge.fake / "linger").write_text("30\n", encoding="utf-8")
+    start = time.monotonic()
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert time.monotonic() - start < 10
+    assert res.returncode == 3, res.stderr
+    assert res.stdout == ""
+    assert "pin mismatch on model" in res.stderr
+    assert _STOPPED in res.stderr
+    assert _REDISPATCH in res.stderr
+    assert _NO_REDISPATCH not in res.stderr
 
 
 def test_missing_init_event_exits_3(bridge: Bridge) -> None:
@@ -714,7 +739,8 @@ def test_cdpath_cannot_redirect_kit_root(
 
 @pytest.mark.skipif(not _BOUND, reason="no timeout/gtimeout on PATH")
 def test_wall_clock_timeout_exits_124(bridge: Bridge) -> None:
-    (bridge.fake / "sleep").write_text("30\n", encoding="utf-8")
+    (bridge.fake / "stdout").write_text("", encoding="utf-8")
+    (bridge.fake / "linger").write_text("30\n", encoding="utf-8")
     res = bridge.run(
         "code-reviewer",
         str(bridge.prompt),
@@ -787,7 +813,7 @@ def test_outside_git_repo_is_refused(bridge: Bridge, tmp_path: Path) -> None:
     assert bridge.calls() == []
 
 
-def _unbound(bridge: Bridge, bounded: bool) -> None:
+def _set_bounded(bridge: Bridge, bounded: bool) -> None:
     """Run with (bounded) or without the external timeout binary."""
     if bounded and not _BOUND:
         pytest.skip("no timeout/gtimeout on PATH")
@@ -806,16 +832,21 @@ def _spawn(bridge: Bridge) -> subprocess.Popen[str]:
     )
 
 
-@pytest.mark.parametrize("bounded", [True, False])
-def test_sigterm_stops_child_process(bridge: Bridge, bounded: bool) -> None:
-    _unbound(bridge, bounded)
-    (bridge.fake / "sleep").write_text("2\n", encoding="utf-8")
-    proc = _spawn(bridge)
+def _wait_started(bridge: Bridge, proc: subprocess.Popen[str]) -> None:
+    """Block until the fake agy is up and lingering."""
     deadline = time.monotonic() + 30
-    started = bridge.fake / "started"
-    while not started.exists():
+    while not (bridge.fake / "started").exists():
         assert proc.poll() is None and time.monotonic() < deadline
         time.sleep(0.05)
+
+
+@pytest.mark.parametrize("bounded", [True, False])
+def test_sigterm_stops_child_process(bridge: Bridge, bounded: bool) -> None:
+    _set_bounded(bridge, bounded)
+    (bridge.fake / "stdout").write_text("", encoding="utf-8")
+    (bridge.fake / "linger").write_text("2\n", encoding="utf-8")
+    proc = _spawn(bridge)
+    _wait_started(bridge, proc)
     sent_at = time.monotonic()
     proc.terminate()
     out, _ = proc.communicate(timeout=30)
@@ -826,66 +857,38 @@ def test_sigterm_stops_child_process(bridge: Bridge, bounded: bool) -> None:
     assert not (bridge.fake / "survived").exists()
 
 
-def _watcher_pids(root: Path) -> list[int]:
-    """Pids whose command line names a path under ``root``, as /proc shows."""
-    needle = str(root).encode()
-    pids = []
-    for entry in Path("/proc").iterdir():
-        if not entry.name.isdigit() or int(entry.name) == os.getpid():
-            continue
-        try:
-            cmdline = (entry / "cmdline").read_bytes()
-        except OSError:
-            continue
-        if needle in cmdline:
-            pids.append(int(entry.name))
-    return pids
+_BAD_INITS = [
+    (
+        _stream(permission_mode="auto", include_result=False),
+        "unexpected permission_mode 'auto'",
+    ),
+    (
+        _stream(tools=["run_command"], include_result=False),
+        "unexpected tools in init event",
+    ),
+]
 
 
-def _assert_no_leftover(bridge: Bridge) -> None:
-    """No process names this test's temp dir (the watcher's arguments do).
-
-    The scan is proven by a control process that does name it.
-    """
-    if not Path("/proc/self/cmdline").exists():
-        pytest.skip("no /proc")
-    control = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            "import time; time.sleep(30)",
-            str(bridge.tmp_dir),
-        ]
-    )
-    try:
-        time.sleep(0.2)
-        assert _watcher_pids(bridge.tmp_dir) == [control.pid]
-    finally:
-        control.kill()
-        control.wait()
-    time.sleep(0.2)
-    assert _watcher_pids(bridge.tmp_dir) == []
+def _assert_early_stop(
+    bridge: Bridge, res: subprocess.CompletedProcess[str], expected: str
+) -> None:
+    assert res.returncode == 3, res.stderr
+    assert res.stdout == ""
+    assert f"ERROR: {expected}" in res.stderr
+    assert _STOPPED in res.stderr
+    assert _NO_REDISPATCH in res.stderr
+    assert "installed agy (1.5.16)" in res.stderr
+    assert _REDISPATCH not in res.stderr
+    assert "tokens unavailable; never estimate." in res.stderr
+    assert (bridge.fake / "started").exists()
 
 
 @pytest.mark.parametrize("bounded", [True, False])
-@pytest.mark.parametrize(
-    "bad_stream, expected",
-    [
-        (_stream(model="gemini-wrong", include_result=False), "pin mismatch"),
-        (
-            _stream(permission_mode="auto", include_result=False),
-            "unexpected permission_mode 'auto'",
-        ),
-        (
-            _stream(tools=["run_command"], include_result=False),
-            "unexpected tools in init event",
-        ),
-    ],
-)
+@pytest.mark.parametrize("bad_stream, expected", _BAD_INITS)
 def test_init_mismatch_stops_agy_early(
     bridge: Bridge, bounded: bool, bad_stream: str, expected: str
 ) -> None:
-    _unbound(bridge, bounded)
+    _set_bounded(bridge, bounded)
     (bridge.fake / "stdout").write_text(bad_stream, encoding="utf-8")
     (bridge.fake / "linger").write_text("30\n", encoding="utf-8")
     start = time.monotonic()
@@ -893,15 +896,7 @@ def test_init_mismatch_stops_agy_early(
     # The wrapper waits for agy, so returning well inside the 30-second
     # linger is the proof that agy was stopped.
     assert time.monotonic() - start < 10
-    assert res.returncode == 3, res.stderr
-    assert res.stdout == ""
-    assert f"ERROR: {expected}" in res.stderr
-    assert "Stopped agy at its init event" in res.stderr
-    assert _NO_REDISPATCH in res.stderr
-    assert "installed agy (1.5.16)" in res.stderr
-    assert _REDISPATCH not in res.stderr
-    assert (bridge.fake / "started").exists()
-    _assert_no_leftover(bridge)
+    _assert_early_stop(bridge, res, expected)
 
 
 def test_init_mismatch_early_stop_names_transcript(
@@ -918,6 +913,46 @@ def test_init_mismatch_early_stop_names_transcript(
     assert '"event": "init"' in transcript.read_text(encoding="utf-8")
 
 
+def test_split_init_line_still_stops_agy(bridge: Bridge) -> None:
+    (bridge.fake / "stdout").write_text(
+        _BAD_INITS[1][0].rstrip("\n"), encoding="utf-8"
+    )
+    (bridge.fake / "split").touch()
+    (bridge.fake / "linger").write_text("30\n", encoding="utf-8")
+    start = time.monotonic()
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert time.monotonic() - start < 10
+    _assert_early_stop(bridge, res, _BAD_INITS[1][1])
+
+
+@pytest.mark.parametrize("bad_stream, expected", _BAD_INITS)
+def test_unterminated_bad_init_is_caught_by_final_verification(
+    bridge: Bridge, bad_stream: str, expected: str
+) -> None:
+    # No newline: the watcher can never parse the line, `verify` does.
+    (bridge.fake / "stdout").write_text(bad_stream.rstrip("\n"), "utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 3, res.stderr
+    assert f"ERROR: {expected}" in res.stderr
+    assert _NO_REDISPATCH in res.stderr
+    assert "Stopped agy" not in res.stderr
+    assert _REDISPATCH not in res.stderr
+
+
+@pytest.mark.parametrize("attempt", range(3))
+def test_bad_init_outranks_agys_own_status(
+    bridge: Bridge, attempt: int
+) -> None:
+    (bridge.fake / "stdout").write_text(
+        _stream(tools=["run_command"]), encoding="utf-8"
+    )
+    (bridge.fake / "status").write_text("7\n", encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 3, (attempt, res.stderr)
+    assert _NO_REDISPATCH in res.stderr
+    assert "agy exited 7" not in res.stderr
+
+
 def test_valid_init_is_not_stopped(bridge: Bridge) -> None:
     (bridge.fake / "stdout").write_text(
         _stream(include_result=False), encoding="utf-8"
@@ -929,7 +964,6 @@ def test_valid_init_is_not_stopped(bridge: Bridge) -> None:
     assert "no result event" in res.stderr
     assert _REDISPATCH in res.stderr
     assert "Stopped agy" not in res.stderr
-    _assert_no_leftover(bridge)
 
 
 @pytest.mark.parametrize("version", ["1.5.17", "1.6.0", "2.0.0"])
@@ -938,7 +972,10 @@ def test_newer_agy_runs_with_notice(bridge: Bridge, version: str) -> None:
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert res.returncode == 0, res.stderr
     assert res.stdout == _MESSAGE
-    assert f"NOTE: agy {version} is newer than 1.5.16," in res.stderr
+    assert (
+        f"NOTE: agy {version} is newer than 1.5.16, the newest version this\n"
+        "  bridge was measured on; the run may fail verification.\n"
+    ) in res.stderr
     assert res.stderr.index("NOTE:") < res.stderr.index("Dispatching")
 
 
@@ -948,25 +985,110 @@ def test_measured_version_has_no_notice(bridge: Bridge) -> None:
     assert "NOTE:" not in res.stderr
 
 
+def test_json_py_in_caller_cwd_is_never_imported(bridge: Bridge) -> None:
+    marker = bridge.project / "imported"
+    (bridge.project / "json.py").write_text(
+        f"open({str(marker)!r}, 'w').close()\n", encoding="utf-8"
+    )
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 0, res.stderr
+    assert res.stdout == _MESSAGE
+    assert not marker.exists()
+
+
+needs_proc = pytest.mark.skipif(
+    not Path("/proc/self/cmdline").exists(), reason="no /proc"
+)
+
+
+def _pids_naming(root: Path) -> list[int]:
+    """Pids whose command line names a path under ``root``, as /proc shows.
+
+    The wrapper's watcher is one: its arguments hold the stream file.
+    """
+    needle = str(root).encode()
+    pids = []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit() or int(entry.name) == os.getpid():
+            continue
+        try:
+            cmdline = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if needle in cmdline:
+            pids.append(int(entry.name))
+    return pids
+
+
+def _wait_until_none_names(root: Path, seconds: float = 3.0) -> list[int]:
+    """Poll until no process names ``root``; the pids left at the deadline."""
+    deadline = time.monotonic() + seconds
+    while (pids := _pids_naming(root)) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return pids
+
+
+@needs_proc
+def test_pid_scan_finds_a_process_naming_the_directory(bridge: Bridge) -> None:
+    control = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"]
+        + [str(bridge.tmp_dir)]
+    )
+    try:
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            if _pids_naming(bridge.tmp_dir) == [control.pid]:
+                break
+            time.sleep(0.05)
+        assert _pids_naming(bridge.tmp_dir) == [control.pid]
+    finally:
+        control.kill()
+        control.wait()
+    assert _wait_until_none_names(bridge.tmp_dir) == []
+
+
+@needs_proc
+def test_watcher_outlives_a_valid_init_while_agy_runs(bridge: Bridge) -> None:
+    (bridge.fake / "stdout").write_text(
+        _stream(include_result=False), encoding="utf-8"
+    )
+    (bridge.fake / "linger").write_text("2\n", encoding="utf-8")
+    proc = _spawn(bridge)
+    _wait_started(bridge, proc)
+    time.sleep(0.6)
+    assert len(_pids_naming(bridge.tmp_dir)) >= 1
+    proc.communicate(timeout=30)
+    assert proc.returncode == 3
+    assert _wait_until_none_names(bridge.tmp_dir) == []
+
+
+@needs_proc
 def test_verified_run_leaves_no_watcher(bridge: Bridge) -> None:
     res = bridge.run("code-reviewer", str(bridge.prompt))
     assert res.returncode == 0, res.stderr
-    _assert_no_leftover(bridge)
+    assert _wait_until_none_names(bridge.tmp_dir) == []
 
 
+@needs_proc
+def test_early_stop_leaves_no_watcher(bridge: Bridge) -> None:
+    (bridge.fake / "stdout").write_text(_BAD_INITS[1][0], encoding="utf-8")
+    (bridge.fake / "linger").write_text("30\n", encoding="utf-8")
+    res = bridge.run("code-reviewer", str(bridge.prompt))
+    assert res.returncode == 3, res.stderr
+    assert _wait_until_none_names(bridge.tmp_dir) == []
+
+
+@needs_proc
 @pytest.mark.parametrize("bounded", [True, False])
 def test_sigterm_leaves_no_watcher(bridge: Bridge, bounded: bool) -> None:
-    _unbound(bridge, bounded)
+    _set_bounded(bridge, bounded)
     (bridge.fake / "stdout").write_text(
         _stream(include_result=False), encoding="utf-8"
     )
     (bridge.fake / "linger").write_text("20\n", encoding="utf-8")
     proc = _spawn(bridge)
-    deadline = time.monotonic() + 30
-    while not (bridge.fake / "started").exists():
-        assert proc.poll() is None and time.monotonic() < deadline
-        time.sleep(0.05)
+    _wait_started(bridge, proc)
     proc.terminate()
     proc.communicate(timeout=30)
     assert proc.returncode == 128 + signal.SIGTERM
-    _assert_no_leftover(bridge)
+    assert _wait_until_none_names(bridge.tmp_dir) == []
