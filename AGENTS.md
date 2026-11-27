@@ -161,8 +161,10 @@ with a dedicated SSH release key (`~/.ssh/id_agent_kit`, overridable via
      `## [Unreleased]` section; ordinary PRs never edit `CHANGELOG.md`);
    - passes `make lint`, `make gate`, `claude plugin validate .` and
      `agy plugin validate .`.
-3. Squash-merge the release pull request to `main` with no other pull
-   request landing between it and tagging.
+3. Merge the release pull request to `main` with no other pull request
+   landing between it and tagging. The forge merges fast-forward only,
+   so the pull request's commits land as they are and the tag goes on
+   the last of them.
 4. From a clean checkout at the repository root, sign and push the
    annotated tag `vX.Y.Z` and fast-forward the protected `release` branch
    (needs git 2.35 or later, OpenSSH 8.1 or later, and the dedicated
