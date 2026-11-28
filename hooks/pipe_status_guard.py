@@ -95,6 +95,7 @@ from hook_lib import (
     command_text,
     deny,
     effective_tool,
+    git_subcommand,
     read_payload,
     strip_heredocs,
     tokenize_lines,
@@ -167,18 +168,6 @@ GATES = {
 # reports tail's success over a refused push. Every other subcommand stays
 # browsing (`git log | head`).
 GIT_GATE_SUBCOMMANDS = {"commit", "push"}
-# git's global options that take their value as the NEXT word; every other
-# option is one token (`--git-dir=x`, `--no-pager`, `-p`).
-GIT_OPTS_WITH_VALUE = {
-    "-C",
-    "-c",
-    "--git-dir",
-    "--work-tree",
-    "--namespace",
-    "--super-prefix",
-    "--config-env",
-    "--attr-source",
-}
 # Repo gates invoked by path: any `*.sh` script (judged on the command's
 # basename, so `./test.sh`, `ci/run.sh` and `bash x.sh` all count) and the
 # `scripts/*.py` ones. Unanchored + fullmatch: '$' would also accept a
@@ -265,23 +254,9 @@ def _wrong_array_for_shell(cmd: str) -> tuple[str, str] | None:
     return None
 
 
-def _git_subcommand(args: list[str]) -> str:
-    """The subcommand of a ``git`` invocation, past its global options."""
-    i = 0
-    while i < len(args):
-        arg = args[i]
-        if arg in GIT_OPTS_WITH_VALUE:
-            i += 2
-        elif arg.startswith("-"):
-            i += 1
-        else:
-            return arg
-    return ""
-
-
 def _is_gate(name: str, raw: str, args: list[str]) -> bool:
     if name == "git":
-        return _git_subcommand(args) in GIT_GATE_SUBCOMMANDS
+        return git_subcommand(args)[0] in GIT_GATE_SUBCOMMANDS
     return (
         name in GATES or name.endswith(".sh") or bool(GATE_PATH.fullmatch(raw))
     )

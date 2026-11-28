@@ -5,7 +5,14 @@ hook: the stdin payload parse — which fails OPEN, because an absent or
 malformed hook payload must never block a tool call — the PreToolUse deny
 envelope (Claude/Codex snake_case vs Antigravity camelCase), the path
 resolution for Claude edits, Codex patches and Antigravity file tools, and
-the shell tokenizer every Bash guard reads commands with. Import as a
+the shell tokenizer every Bash guard reads commands with. Shared by the
+guards that read what a command posts or records: ``CLOSING_KEYWORD`` and
+``EXPANSION``, the patterns for a closing or reopen keyword before an issue
+reference and for a shell expansion; ``lift_heredocs`` and
+``restore_heredocs``, which take a quoted ``$(cat <<'EOF' ... EOF)`` body out
+of a command and put it back; ``command_words``, each simple command seen
+through ``( )``, ``$( )`` and shell words; and ``git_subcommand``, a ``git``
+call's subcommand past its global options. Import as a
 sibling module (``import hook_lib``; hooks run by path, so this directory is
 already on ``sys.path``).
 """
@@ -81,6 +88,40 @@ PREFIXES = {
 # (`sudo pytest -v`) as a lookup and stop checking.
 LOOKUP_PREFIXES = {"command", "builtin"}
 LOOKUP_FLAGS = {"-v", "-V"}
+
+# A closing or reopen keyword directly before an issue reference: the forge
+# acts on it wherever it stands.
+CLOSING_KEYWORD = re.compile(
+    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|reopen(?:s|ed)?):?[ \t]*"
+    r"(?:[\w.-]+/[\w.-]+)?#\d+",
+    re.IGNORECASE,
+)
+# A shell expansion: the text it stands in cannot be read from the command.
+EXPANSION = re.compile(r"`|\$[A-Za-z0-9_{(@*#?!$-]")
+# Words the shell allows in front of a command, and `(`/`)` around one.
+SHELL_WORDS = {"{", "}", "!", "then", "do", "else"}
+_REDIRECT = re.compile(r"[<>&|]+")
+# `$(cat <<'EOF' ... EOF)`, the one readable multi-line body form. An
+# unquoted delimiter matches too, so its body leaves the text and cannot
+# unbalance the quotes around it; it is then denied as an expansion.
+_HEREDOC_SUB = re.compile(
+    r"\$\(\s*cat\s+<<-?\s*(['\"]?)([\w-]+)\1[ \t]*\n"
+    r"(?:(.*?)\n)?[ \t]*\2\s*\)",
+    re.DOTALL,
+)
+_PLACEHOLDER = re.compile("\x1f(\\d+)\x1f")
+# git's global options that take their value as the NEXT word; every other
+# option is one token (`--git-dir=x`, `--no-pager`, `-p`).
+GIT_OPTS_WITH_VALUE = {
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+    "--namespace",
+    "--super-prefix",
+    "--config-env",
+    "--attr-source",
+}
 
 
 def strip_heredocs(text: str) -> str:
@@ -284,6 +325,86 @@ def effective_tool(name: str, args: list[str]) -> tuple[str, list[str]]:
                 name, args = os.path.basename(rest[0]), rest[1:]
                 continue
         return name, args
+
+
+def lift_heredocs(cmd: str) -> tuple[str, list[str]]:
+    """*cmd* with each ``$(cat <<'WORD' ... WORD)`` body made a placeholder.
+
+    Returns the command and the lifted bodies; :func:`restore_heredocs` puts
+    one back. An unquoted delimiter becomes the literal
+    ``$(unquoted-heredoc)``, which :data:`EXPANSION` matches.
+    """
+    bodies: list[str] = []
+
+    def lift(m: re.Match[str]) -> str:
+        if not m[1]:
+            return "$(unquoted-heredoc)"
+        bodies.append(m[3] or "")
+        return f"\x1f{len(bodies) - 1}\x1f"
+
+    return _HEREDOC_SUB.sub(lift, cmd), bodies
+
+
+def restore_heredocs(tok: str, bodies: list[str]) -> str:
+    """*tok* with each placeholder replaced by its lifted heredoc body."""
+
+    def body(m: re.Match[str]) -> str:
+        n = int(m[1])
+        return bodies[n] if n < len(bodies) else m[0]
+
+    return _PLACEHOLDER.sub(body, tok)
+
+
+def _without_redirects(args: list[str]) -> list[str]:
+    """Drop each redirect operator and the token after it."""
+    out: list[str] = []
+    skip = False
+    for tok in args:
+        if skip:
+            skip = False
+        elif _REDIRECT.fullmatch(tok) and ("<" in tok or ">" in tok):
+            skip = True
+        else:
+            out.append(tok)
+    return out
+
+
+def command_words(cmd: str) -> list[tuple[str, list[str]]]:
+    """Each simple command, entered through `( )`, `$( )` and shell words.
+
+    `pr=$(tea pulls create ...)`, `(tea ...)`, `{ tea ...; }`, `! tea ...`
+    and the body of an `if` or a loop hide the command word behind a token
+    the tokenizer leaves in place. A wrapper (`command`, `env`, ...) is
+    unwrapped; redirects are dropped.
+    """
+    out: list[tuple[str, list[str]]] = []
+    for first, tail in simple_commands(cmd, multiline=True):
+        seg: list[str] = []
+        for tok in [first, *_without_redirects(tail), ")"]:
+            if tok not in {"(", ")"}:
+                seg.append(tok)
+                continue
+            while seg and (seg[0] in SHELL_WORDS or ENV_ASSIGN.match(seg[0])):
+                seg = seg[1:]
+            if seg:
+                word = seg[0].rsplit("/", 1)[-1]
+                out.append(effective_tool(word, seg[1:]))
+            seg = []
+    return out
+
+
+def git_subcommand(args: list[str]) -> tuple[str, list[str]]:
+    """A ``git`` call's subcommand, past its global options, and its args."""
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in GIT_OPTS_WITH_VALUE:
+            i += 2
+        elif arg.startswith("-"):
+            i += 1
+        else:
+            return arg, args[i + 1 :]
+    return "", []
 
 
 ANTIGRAVITY_FILE_TOOLS: frozenset[str] = frozenset(

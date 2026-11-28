@@ -37,12 +37,14 @@ guard. Shared plumbing and the shell tokenizer live in hook_lib.py.
 import re
 
 from hook_lib import (
-    ENV_ASSIGN,
+    CLOSING_KEYWORD,
+    EXPANSION,
     command_text,
+    command_words,
     deny,
-    effective_tool,
+    lift_heredocs,
     read_payload,
-    simple_commands,
+    restore_heredocs,
     tool_input,
 )
 
@@ -79,29 +81,10 @@ PULL_GUARDED = {"approve", "lgtm", "a", "reject", "reply", "merge", "m"}
 PULL_ADMITTING = {"create", "c", "edit", "e"}
 DESCRIPTION_FLAGS = {"-d", "--description"}
 DESCRIPTION_PREFIXES = ("-d=", "--description=")
-# Words the shell allows in front of a command, and `(`/`)` around one.
-SHELL_WORDS = {"{", "}", "!", "then", "do", "else"}
-
-# `$(cat <<'EOF' ... EOF)`, the one readable multi-line body form. An
-# unquoted delimiter matches too, so its body leaves the text and cannot
-# unbalance the quotes around it; it is then denied as an expansion.
-_HEREDOC_SUB = re.compile(
-    r"\$\(\s*cat\s+<<-?\s*(['\"]?)([\w-]+)\1[ \t]*\n"
-    r"(?:(.*?)\n)?[ \t]*\2\s*\)",
-    re.DOTALL,
-)
-_PLACEHOLDER = re.compile("\x1f(\\d+)\x1f")
 # A number glued to a redirect operator is a descriptor (`2>&1`), not an
 # index; `tea issues 2 > out` keeps its `2`.
 _FD = re.compile(r"(?<![\w.$#-])\d+(?=[<>])")
-_REDIRECT = re.compile(r"[<>&|]+")
-_EXPANSION = re.compile(r"`|\$[A-Za-z0-9_{(@*#?!$-]")
 _CLOSES_LINE = re.compile(r"^[ \t]*Closes #\d+[ \t]*$", re.MULTILINE)
-_KEYWORD = re.compile(
-    r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|reopen(?:s|ed)?):?[ \t]*"
-    r"(?:[\w.-]+/[\w.-]+)?#\d+",
-    re.IGNORECASE,
-)
 
 _KEYWORD_MSG = (
     "This tea call would post {found!r}: a closing or reopen keyword "
@@ -149,20 +132,6 @@ def _first_positional(args: list[str]) -> str:
     return (_positionals(args) or [""])[0]
 
 
-def _without_redirects(args: list[str]) -> list[str]:
-    """Drop each redirect operator and the token after it."""
-    out: list[str] = []
-    skip = False
-    for tok in args:
-        if skip:
-            skip = False
-        elif _REDIRECT.fullmatch(tok) and ("<" in tok or ">" in tok):
-            skip = True
-        else:
-            out.append(tok)
-    return out
-
-
 def _posted(rest: list[str], bodies: list[str], admit: bool) -> list[str]:
     """Each token as tea would send it, heredoc bodies put back.
 
@@ -170,13 +139,9 @@ def _posted(rest: list[str], bodies: list[str], admit: bool) -> list[str]:
     `Closes #N` lines.
     """
 
-    def body(m: re.Match[str]) -> str:
-        n = int(m[1])
-        return bodies[n] if n < len(bodies) else m[0]
-
     out = []
     for i, tok in enumerate(rest):
-        text = _PLACEHOLDER.sub(body, tok)
+        text = restore_heredocs(tok, bodies)
         if admit and tok.startswith(DESCRIPTION_PREFIXES):
             text = _CLOSES_LINE.sub("", text.split("=", 1)[1])
         elif admit and i and rest[i - 1] in DESCRIPTION_FLAGS:
@@ -198,7 +163,7 @@ def _check_write(group: str, rest: list[str], bodies: list[str]) -> None:
     if any(t.startswith("--description-file") for t in rest):
         deny(_FILE_MSG)
     for tok in rest:
-        if found := _EXPANSION.search(tok):
+        if found := EXPANSION.search(tok):
             deny(_EXPANSION_MSG.format(found=found.group(0)))
     texts = _posted(rest, bodies, admit)
     if comment:
@@ -213,50 +178,17 @@ def _check_write(group: str, rest: list[str], bodies: list[str]) -> None:
             deny(_NO_BODY_MSG)
         texts.append(" ".join(_posted(pos[1:], bodies, admit=False)))
     for text in texts:
-        if found := _KEYWORD.search(text):
+        if found := CLOSING_KEYWORD.search(text):
             deny(_KEYWORD_MSG.format(found=found.group(0)))
-
-
-def _commands(cmd: str) -> list[tuple[str, list[str]]]:
-    """Each simple command, entered through `( )`, `$( )` and shell words.
-
-    `pr=$(tea pulls create ...)`, `(tea ...)`, `{ tea ...; }`, `! tea ...`
-    and the body of an `if` or a loop hide the command word behind a token
-    the shared tokenizer leaves in place. A wrapper (`command`, `env`, ...)
-    is unwrapped, then tea's own global flags (`tea --debug comment ...`),
-    none of which takes a value, are skipped.
-    """
-    out: list[tuple[str, list[str]]] = []
-    for first, tail in simple_commands(cmd, multiline=True):
-        seg: list[str] = []
-        for tok in [first, *_without_redirects(tail), ")"]:
-            if tok not in {"(", ")"}:
-                seg.append(tok)
-                continue
-            while seg and (seg[0] in SHELL_WORDS or ENV_ASSIGN.match(seg[0])):
-                seg = seg[1:]
-            if seg:
-                word = seg[0].rsplit("/", 1)[-1]
-                name, args = effective_tool(word, seg[1:])
-                while args and args[0].startswith("-"):
-                    args = args[1:]
-                out.append((name, args))
-            seg = []
-    return out
 
 
 def main() -> None:
     cmd = command_text(tool_input(read_payload()))
-    bodies: list[str] = []
-
-    def lift(m: re.Match[str]) -> str:
-        if not m[1]:
-            return "$(unquoted-heredoc)"
-        bodies.append(m[3] or "")
-        return f"\x1f{len(bodies) - 1}\x1f"
-
-    cmd = _FD.sub("", _HEREDOC_SUB.sub(lift, cmd))
-    for name, args in _commands(cmd):
+    cmd, bodies = lift_heredocs(cmd)
+    for name, args in command_words(_FD.sub("", cmd)):
+        # tea's own global flags (`tea --debug comment ...`) take no value.
+        while args and args[0].startswith("-"):
+            args = args[1:]
         if name != "tea" or not args:
             continue
         group, rest = args[0], args[1:]
