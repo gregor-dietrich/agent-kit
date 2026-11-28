@@ -214,6 +214,64 @@ When both opt-in files exist in a Claude Code session, Stage 1c prefers
 can opt you in. A project that names its own bridge keeps it, unless the
 checkout changes that bridge.
 
+## Versioning
+
+From `1.0.0` on, releases follow semantic versioning, and the part of
+the version that changes says what an update asks of you. Releases
+before `1.0.0` promise nothing; `CHANGELOG.md` records what each one
+changed.
+
+A **major** release is one in which something you or a project wrote,
+or a name you type, stops working:
+
+- the hooks' Python floor rises above 3.10;
+- a supported client (Claude Code, Codex, Antigravity) is dropped;
+- a skill, a role, or an argument a skill's `argument-hint` lists is
+  removed or renamed;
+- a hook is removed, or a guard stops denying calls that its row in
+  "What is here" says it denies;
+- the decisions-log format above changes: its `## ADR-NNNN` headings,
+  its `**Status:**` markers, or its `**Premise:**` and `**Guard:**`
+  lines;
+- an opt-in marker file or an environment variable this README names is
+  renamed or removed;
+- the marketplace name, the plugin id `agent-kit@agent-kit`, the
+  `release` branch or the `vX.Y.Z` tag scheme is renamed.
+
+A **minor** release may make the kit do more, refuse more, or need one
+step from you when you update:
+
+- a guard denies, or a bridge rejects, what the previous release let
+  through: a new guard or rule, or an existing rule that reaches more
+  spellings of the call it names;
+- the session temp-dir pruner removes more than it did;
+- a hook command changes, which Codex holds back until you trust it
+  again in `/hooks`;
+- a skill, role, hook or opt-in is added;
+- an opt-in bridge needs a newer version of its CLI;
+- a role's model pin changes, or a skill, a role or the SessionStart
+  note tells an agent to do something different;
+- `allowed_signers` names a new release key.
+
+A **patch** release asks nothing of you and refuses nothing the previous
+release let through: a guard that stops denying a call it denied by
+mistake, a crash fixed, a clearer message, a wording change that
+instructs the same.
+
+A guard that newly denies a call is minor, not major: the deny reaches
+the agent inside the session, with its reason, before the call runs,
+and nothing you wrote has to change. A minor release's `CHANGELOG.md`
+entry names each call newly denied and each step the update needs.
+
+Outside the promise, and free to change in any release:
+`hooks/hook_lib.py`, the bridge scripts' arguments and exit statuses
+and the role frontmatter keys they read (only this kit's own skills
+call them), section headings inside skills, the `.plans/` working
+files, and the versions of the three clients the kit runs on: a
+version this README names is where behaviour was measured, not a
+minimum. A move of the repository is outside it too, since an install
+on the old address never sees the release that announces it.
+
 ## Warning: a broken hook is a silent hook
 
 A `PreToolUse` hook that crashes **fails open** — the tool call proceeds.
@@ -258,7 +316,8 @@ from the manifests and is signed with a dedicated SSH release key
    (`git log <last-tag>..origin/main --stat`). Do not cut a release with
    nothing shippable to list.
 2. Open a release pull request targeting `main` that:
-   - bumps `version` to `X.Y.Z` in `.claude-plugin/plugin.json`,
+   - bumps `version` to `X.Y.Z`, the part "Versioning" above names for
+     the changes since the last release, in `.claude-plugin/plugin.json`,
      `.codex-plugin/plugin.json` and `.antigravity-plugin/plugin.json`
      (`pyproject.toml` is test-environment metadata and is not bumped);
    - adds a `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md`
