@@ -49,8 +49,8 @@ that can break silently.
   shadowing `PYTHONPATH`, a bad `PYTHONHOME` and a user site that exits.
 - Keep `.claude-plugin/plugin.json`, `.codex-plugin/plugin.json` and
   `.antigravity-plugin/plugin.json` at the same `name` and `version`.
-  Pull requests never change `version`; only a deliberate release PR
-  bumps it (see "Releasing" below). Claude Code and Codex cache an
+  Pull requests never change `version` or edit `CHANGELOG.md`; only a deliberate
+  release PR does (see "Releasing" below). Claude Code and Codex cache an
   installed copy keyed by `version`, so installs track the `release`
   branch (and Antigravity installs from a `v*` tag), never unreleased
   `main`. Changes to what an installed copy loads — `.claude-plugin/`,

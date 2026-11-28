@@ -278,7 +278,7 @@ from the manifests and is signed with a dedicated SSH release key
    private key file
    (`SHA256:dYsHxqttXNQpFhcKpXte7CSrVi2uHdexcEBomV0SHCE`) at
    `~/.ssh/id_agent_kit`, or at the path `AGENT_KIT_RELEASE_KEY` names;
-   no ssh-agent is involved. It switches to `main`, fast-forwards it to
+   no ssh-agent is needed. It switches to `main`, fast-forwards it to
    the remote's, refuses when the two still differ or the tree is not
    clean, and signs with that file only when its public key is the one
    `allowed_signers` names, so a tag can only be signed by the pinned
@@ -297,16 +297,22 @@ from the manifests and is signed with a dedicated SSH release key
    file=${AGENT_KIT_RELEASE_KEY:-$HOME/.ssh/id_agent_kit} &&
      { [ "$(ssh-keygen -y -f "$file" | cut -d' ' -f1,2)" = "$key" ] ||
        { echo "$file is not the release key allowed_signers names" >&2; false; }; } &&
-   tag=v$(python3 -c 'import json, sys; vs = {json.load(open(p))["version"].strip() for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".antigravity-plugin/plugin.json")}; assert len(vs) == 1, f"manifest versions differ: {vs}"; v = next(iter(vs)); print(v or sys.exit("plugin.json declares no version"))') &&
+   tag=v$(python3 -c 'import json, sys; vs = {json.load(open(p))["version"].strip() for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".antigravity-plugin/plugin.json")}; len(vs) == 1 or sys.exit(f"manifest versions differ: {vs}"); v = next(iter(vs)); print(v or sys.exit("plugin.json declares no version"))') &&
      { ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null ||
-       { echo "tag $tag already exists: main's manifests declare ${tag#v}, merge the release pull request first" >&2; false; }; } &&
+       { echo "tag $tag already exists: main's manifests declare ${tag#v}; a new release needs its pull request merged first" >&2; false; }; } &&
      git -c gpg.format=ssh -c user.signingKey="$file" tag -a -s "$tag" -m "agent-kit $tag" &&
      { git push origin "$tag" ||
        { git tag -d "$tag" >/dev/null; echo "tag push failed; deleted local $tag" >&2; false; }; } &&
      git push origin "${tag}^{commit}:refs/heads/release"
    ```
 
+   When only the last push fails, the tag is already published and a
+   rerun stops at "tag ... already exists": push `release` alone, with
+   `git push origin "vX.Y.Z^{commit}:refs/heads/release"`.
+
    The release key signs agent-kit's release tags and nothing else: a
-   signature binds the commit, type, tag name and namespace, not the
-   repository. To check a tag against the pinned key, run
+   signature binds the tag object (its commit, tag name, tagger and
+   message) and the namespace, not the repository. To check a tag
+   against the pinned key, run
    `git -c gpg.ssh.allowedSignersFile=allowed_signers verify-tag vX.Y.Z`.
+   Tags before `v0.6.0` carry no signature.
