@@ -1,4 +1,4 @@
-"""Behavioral pin for the release snippet in ``README.md``, "Releasing".
+"""Behavioral pin for the tagging snippet in ``README.md``, "Releasing".
 
 Extracts the first ``sh`` block under that heading and runs it as printed,
 under bash and, where installed, zsh, in a throwaway clone of a scratch
@@ -167,6 +167,11 @@ class _Case:
     def tags(self, cwd=None) -> str:
         return self.git("tag", "-l", cwd=cwd)
 
+    def assert_refused(self, done, message):
+        assert done.returncode != 0
+        assert message in done.stderr
+        assert self.tags() == ""
+
     def assert_released(self, done):
         assert done.returncode == 0, done.stderr
         ref = f"refs/tags/{_TAG}"
@@ -207,16 +212,14 @@ def test_branch_named_like_the_tag(case, shell):
 def test_push_rejected(case, shell):
     case.hook("")
     done = case.run(shell)
-    assert done.returncode != 0
-    assert f"git ls-remote origin refs/tags/{_TAG}" in done.stderr
+    case.assert_refused(done, f"git ls-remote origin refs/tags/{_TAG}")
     assert f"deleted local {_TAG}" in done.stderr
-    assert case.tags() == ""
 
 
 @pytest.mark.parametrize("shell", _SHELLS)
 def test_delete_fails(case, shell):
     lock = case.clone / ".git" / "refs" / "tags" / f"{_TAG}.lock"
-    case.hook(f": > '{lock}'")
+    case.hook(f": > {shlex.quote(str(lock))}")
     done = case.run(shell)
     assert done.returncode != 0
     assert f"git ls-remote origin refs/tags/{_TAG}" in done.stderr
@@ -261,10 +264,7 @@ def test_hidden_edit(case, shell, flag):
     manifest = case.clone / _MANIFESTS[0]
     manifest.write_text(manifest.read_text() + "\n")
     case.git("update-index", flag, _MANIFESTS[0])
-    done = case.run(shell)
-    assert done.returncode != 0
-    assert _NOT_CLEAN in done.stderr
-    assert case.tags() == ""
+    case.assert_refused(case.run(shell), _NOT_CLEAN)
 
 
 @pytest.mark.parametrize("shell", _SHELLS)
@@ -276,16 +276,14 @@ def test_push_mapping_cannot_force(case, shell):
     case.git("config", "remote.origin.push", "+refs/tags/*:refs/tags/*")
     done = case.run(shell)
     assert done.returncode != 0
+    assert "tag push failed" in done.stderr
     assert case.origin_git("rev-parse", f"refs/tags/{_TAG}") == published
 
 
 @pytest.mark.parametrize("shell", _SHELLS)
-def test_grep_fails(case, shell):
+def test_grep_missing(case, shell):
     (Path(case.env["PATH"]) / "grep").unlink()
-    done = case.run(shell)
-    assert done.returncode != 0
-    assert _NOT_CLEAN in done.stderr
-    assert case.tags() == ""
+    case.assert_refused(case.run(shell), _NOT_CLEAN)
 
 
 @pytest.mark.parametrize("shell", _SHELLS)
@@ -294,10 +292,8 @@ def test_verify_fails(case, shell):
     revoked.write_text(case.pub)
     case.git("config", "gpg.ssh.revocationFile", str(revoked))
     done = case.run(shell)
-    assert done.returncode != 0
-    assert _NOT_SIGNED in done.stderr
+    case.assert_refused(done, _NOT_SIGNED)
     assert f"deleted local {_TAG}" in done.stderr
-    assert case.tags() == ""
     assert case.tags(case.origin) == ""
 
 
@@ -339,17 +335,11 @@ def test_fsmonitor_hidden_edit(case, shell, tmp_path):
     manifest = case.clone / _MANIFESTS[0]
     manifest.write_text(manifest.read_text() + "\n")
     assert case.git("status", "--porcelain") == ""
-    done = case.run(shell)
-    assert done.returncode != 0
-    assert _NOT_CLEAN in done.stderr
-    assert case.tags() == ""
+    case.assert_refused(case.run(shell), _NOT_CLEAN)
 
 
 @pytest.mark.parametrize("shell", _SHELLS)
 def test_wrong_key(tmp_path, key, shell):
     real = (_ROOT / "allowed_signers").read_text()
     case = _Case(tmp_path, key, signers=real)
-    done = case.run(shell)
-    assert done.returncode != 0
-    assert "is not the release key" in done.stderr
-    assert case.tags() == ""
+    case.assert_refused(case.run(shell), "is not the release key")

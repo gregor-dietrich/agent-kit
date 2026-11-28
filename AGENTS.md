@@ -115,7 +115,7 @@ that can break silently.
   guard once at 3.8, 3.9 and 3.10, and an import check holds every
   `hooks/*.py` import, function-level ones included, to 3.10's stdlib.
   `tests/test_release_snippet.py` needs git 2.35 or later and
-  ssh-keygen, and fails without them.
+  ssh-keygen (OpenSSH 8.2 or later), and fails without them.
 - `make lint` — `lint-repo`, then ruff (80 columns, E501 included;
   target py310, the hooks' floor, and py313 for `tests/`), vulture,
   and devkit's anchored-match and copy-paste gates (`devkit.toml`).

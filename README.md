@@ -365,24 +365,27 @@ from the manifests and is signed with a dedicated SSH release key
    the remote's, refuses when the two still differ, the tree is not
    clean or the tag exists, and signs with that file only when its
    public key is the one `allowed_signers` names. The clean check runs
-   `git status` with fsmonitor off and also refuses skip-worktree and
-   assume-unchanged entries
-   (`git ls-files -v | grep '^[[:lower:]S]'` lists them) and a failing
-   `git status`, `git ls-files` or grep, so what the snippet reads from
-   the working tree matches HEAD as far as `git status` can tell. It
-   passes only on grep's exit status 1, no entry found and no error,
-   which no `pipefail` setting changes. It then verifies the new
-   tag against `allowed_signers` and deletes it when another key signed
-   it, so only a tag the pinned key signed is pushed: git signs with the
-   key a `.pub` file beside the key file names, and lets an ssh-agent
-   that holds that key sign. It pushes the tag, deleting the local one
-   when that push fails, and fast-forwards the protected `release`
-   branch to the tagged commit. Either deletion is reported only when
-   it worked, and a failed tag push also points at `git ls-remote`, as
-   the remote may hold the tag anyway. In a clone with the git hooks
-   `make hooks` installs, both pushes run the pre-push gate, and a red
-   gate fails the tag push and deletes the tag: run `make gate` on the
-   up-to-date `main` first, so the hook skips the gate for that HEAD.
+   `git status` with fsmonitor off and also refuses a failing
+   `git status`, `git ls-files` or grep, and skip-worktree and
+   assume-unchanged entries, which
+   `git ls-files -v | grep '^[[:lower:]S]'` lists, so what the snippet
+   reads from the working tree matches HEAD as far as `git status` can
+   tell. The check passes only when grep exits 1, finding no entry and
+   no error, which no `pipefail` setting changes. It then verifies the
+   new tag against `allowed_signers` and deletes it when another key
+   signed it, so only a tag the pinned key signed is pushed: git signs
+   with the key a `.pub` file beside the key file names, and lets an
+   ssh-agent that holds that key sign. It pushes the tag to an explicit
+   destination, so no push mapping configured in the clone can force
+   it, deleting the local one when that push fails, and fast-forwards
+   the protected `release` branch to the tagged commit. The tag push
+   spells `${tag}` in braces because zsh reads `$tag:r` as a modifier.
+   Either deletion is reported only when it worked, and a failed tag
+   push also points at `git ls-remote`, as the remote may hold the tag
+   anyway. In a clone with the git hooks `make hooks` installs, both
+   pushes run the pre-push gate, and a red gate fails the tag push and
+   deletes the tag: run `make gate` on the up-to-date `main` first, so
+   the hook skips the gate for that HEAD.
    `tests/test_release_snippet.py` runs the snippet as printed here, the
    first `sh` block of this section, under bash and, where installed,
    zsh, against a scratch origin with a throwaway key:
@@ -411,9 +414,10 @@ from the manifests and is signed with a dedicated SSH release key
 
    When only the last push fails, the tag is already published and a
    rerun stops at "tag ... already exists". When the tag push fails but
-   `git ls-remote origin refs/tags/vX.Y.Z` lists the tag, origin took it
-   and the snippet deleted the local one, which a rerun's pull does not
-   fetch back: fetch it with
+   `git ls-remote origin refs/tags/vX.Y.Z` lists the tag, origin holds a
+   tag of that name, and where the run printed "deleted local", the
+   local one is gone, which a rerun's pull does not fetch back: fetch it
+   with
    `git fetch origin refs/tags/vX.Y.Z:refs/tags/vX.Y.Z`. Either way, check
    the tag with the `verify-tag` command below, then push `release`
    alone, with
