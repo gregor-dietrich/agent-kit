@@ -364,18 +364,25 @@ from the manifests and is signed with a dedicated SSH release key
    no ssh-agent is needed. It switches to `main`, fast-forwards it to
    the remote's, refuses when the two still differ, the tree is not
    clean or the tag exists, and signs with that file only when its
-   public key is the one `allowed_signers` names. The clean check also
-   refuses skip-worktree and assume-unchanged entries and a failing
-   `git status` or `git ls-files`, and leaves fsmonitor out, so the
-   manifests and `allowed_signers` it reads from the working tree are
-   HEAD's. It then verifies the new tag against `allowed_signers` and
-   deletes it when another key signed it, so only a tag the pinned key
-   signed is pushed: git signs with the key a `.pub` file beside the
-   key file names, and lets an ssh-agent that holds that key sign. It
-   pushes the tag, deleting the local one when that push fails (and
-   saying so only when the deletion worked; the failure also points at
-   `git ls-remote`, as the remote may hold the tag anyway), and
-   fast-forwards the protected `release` branch to the tagged commit.
+   public key is the one `allowed_signers` names. The clean check runs
+   `git status` with fsmonitor off and also refuses skip-worktree and
+   assume-unchanged entries
+   (`git ls-files -v | grep '^[[:lower:]S]'` lists them) and a failing
+   `git status`, `git ls-files` or grep, so what the snippet reads from
+   the working tree matches HEAD as far as `git status` can tell. It
+   passes only on grep's exit status 1, no entry found and no error,
+   which no `pipefail` setting changes. It then verifies the new
+   tag against `allowed_signers` and deletes it when another key signed
+   it, so only a tag the pinned key signed is pushed: git signs with the
+   key a `.pub` file beside the key file names, and lets an ssh-agent
+   that holds that key sign. It pushes the tag, deleting the local one
+   when that push fails, and fast-forwards the protected `release`
+   branch to the tagged commit. Either deletion is reported only when
+   it worked, and a failed tag push also points at `git ls-remote`, as
+   the remote may hold the tag anyway. In a clone with the git hooks
+   `make hooks` installs, both pushes run the pre-push gate, and a red
+   gate fails the tag push and deletes the tag: run `make gate` on the
+   up-to-date `main` first, so the hook skips the gate for that HEAD.
    `tests/test_release_snippet.py` runs the snippet as printed here, the
    first `sh` block of this section, under bash and, where installed,
    zsh, against a scratch origin with a throwaway key:
@@ -384,26 +391,32 @@ from the manifests and is signed with a dedicated SSH release key
    git switch -q main && git pull -q --ff-only origin main &&
      { [ "$(git rev-parse HEAD)" = "$(git rev-parse FETCH_HEAD)" ] ||
        { echo "main differs from origin's main" >&2; false; }; } &&
-     { s=$(git -c core.fsmonitor=false status --porcelain --untracked-files=all --ignore-submodules=none) && f=$(git ls-files -v) && [ -z "$s" ] && [ -z "$(printf '%s\n' "$f" | grep '^[[:lower:]S]')" ] ||
+     { s=$(git -c core.fsmonitor=false status --porcelain --untracked-files=all --ignore-submodules=none) && f=$(git ls-files -v) && [ -z "$s" ] && { printf '%s\n' "$f" | grep -q '^[[:lower:]S]'; [ $? -eq 1 ]; } ||
        { echo "working tree is not clean (skip-worktree and assume-unchanged entries count)" >&2; false; }; } &&
    tag=v$(python3 -I -c 'import json, sys; vs = {json.load(open(p))["version"].strip() for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".antigravity-plugin/plugin.json")}; len(vs) == 1 or sys.exit(f"manifest versions differ: {vs}"); v = next(iter(vs)); print(v or sys.exit("plugin.json declares no version"))') &&
      { ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null ||
-       { echo "tag $tag already exists in this clone: if main's manifests (${tag#v}) still name the last release, land the release pull request first; if git ls-remote origin refs/tags/$tag lists it, only the release push is left (see below); otherwise a failed run left it: git tag -d $tag" >&2; false; }; } &&
-   key=$(sed -n 's/^agent-kit-release namespaces="git" \(.*\)$/\1/p' allowed_signers) &&
-     : "${key:?allowed_signers carries no agent-kit-release line}" &&
+       { echo "tag $tag already exists in this clone: if main's manifests (${tag#v}) still name the last release, land the release pull request first; if git ls-remote origin refs/tags/$tag lists it, only the release push is left (README.md, \"Releasing\"); otherwise a failed run left it: git tag -d $tag" >&2; false; }; } &&
+   signer=$(sed -n 's/^agent-kit-release namespaces="git" \(.*\)$/\1/p' allowed_signers) &&
+     : "${signer:?allowed_signers carries no agent-kit-release line}" &&
    file=${AGENT_KIT_RELEASE_KEY:-$HOME/.ssh/id_agent_kit} &&
-     { [ "$(ssh-keygen -y -f "$file" | cut -d' ' -f1,2)" = "$key" ] ||
+     { [ "$(ssh-keygen -y -f "$file" | cut -d' ' -f1,2)" = "$signer" ] ||
        { echo "$file is not the release key allowed_signers names" >&2; false; }; } &&
      git -c gpg.format=ssh -c user.signingKey="$file" tag -a -s "$tag" -m "agent-kit $tag" &&
-     { git -c gpg.ssh.allowedSignersFile=allowed_signers verify-tag "$tag" ||
+     { git -c gpg.ssh.allowedSignersFile=allowed_signers verify-tag "refs/tags/$tag" ||
        { echo "$tag is not signed by the release key allowed_signers names" >&2; git tag -d "$tag" >/dev/null && echo "deleted local $tag" >&2; false; }; } &&
-     { git push origin "refs/tags/$tag" ||
+     { git push origin "refs/tags/${tag}:refs/tags/${tag}" ||
        { echo "tag push failed; origin may hold $tag anyway: check git ls-remote origin refs/tags/$tag before retrying" >&2; git tag -d "$tag" >/dev/null && echo "deleted local $tag" >&2; false; }; } &&
      git push origin "refs/tags/$tag^{commit}:refs/heads/release"
    ```
 
    When only the last push fails, the tag is already published and a
-   rerun stops at "tag ... already exists": push `release` alone, with
+   rerun stops at "tag ... already exists". When the tag push fails but
+   `git ls-remote origin refs/tags/vX.Y.Z` lists the tag, origin took it
+   and the snippet deleted the local one, which a rerun's pull does not
+   fetch back: fetch it with
+   `git fetch origin refs/tags/vX.Y.Z:refs/tags/vX.Y.Z`. Either way, check
+   the tag with the `verify-tag` command below, then push `release`
+   alone, with
    `git push origin "refs/tags/vX.Y.Z^{commit}:refs/heads/release"`.
 
    The release key signs agent-kit's release tags and nothing else: a

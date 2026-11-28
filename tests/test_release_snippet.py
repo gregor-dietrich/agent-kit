@@ -8,6 +8,7 @@ built from scratch.
 """
 
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -22,7 +23,7 @@ _MANIFESTS = (
     ".codex-plugin/plugin.json",
     ".antigravity-plugin/plugin.json",
 )
-_TOOLS = ("git", "ssh-keygen", "sed", "cut", "grep", "printf", "bash", "zsh")
+_TOOLS = ("git", "ssh-keygen", "sed", "cut", "grep", "bash", "zsh")
 _NOT_CLEAN = "working tree is not clean"
 _NOT_SIGNED = "is not signed by the release key allowed_signers names"
 _SHELLS = [
@@ -83,6 +84,7 @@ def _env(tmp_path: Path, farm: Path) -> dict[str, str]:
         "[init]\n\tdefaultBranch = main\n\tdefaultRefFormat = files\n"
     )
     (tmp_path / "home").mkdir()
+    (tmp_path / "tmp").mkdir()
     env = {
         "PATH": str(farm),
         "HOME": str(tmp_path / "home"),
@@ -90,6 +92,7 @@ def _env(tmp_path: Path, farm: Path) -> dict[str, str]:
         "GIT_CONFIG_GLOBAL": str(config),
         "GIT_CEILING_DIRECTORIES": str(tmp_path),
         "LC_ALL": "C",
+        "TMPDIR": str(tmp_path / "tmp"),
     }
     for role in ("AUTHOR", "COMMITTER"):
         env[f"GIT_{role}_NAME"] = "Release Test"
@@ -98,19 +101,15 @@ def _env(tmp_path: Path, farm: Path) -> dict[str, str]:
 
 
 @pytest.fixture(scope="module")
-def keys(tmp_path_factory):
-    """Two throwaway ed25519 key pairs: the release key and another."""
-    root = tmp_path_factory.mktemp("keys")
-    out = []
-    for name in ("release", "other"):
-        path = root / name
-        subprocess.run(
-            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(path)],
-            check=True,
-            capture_output=True,
-        )
-        out.append(path)
-    return out
+def key(tmp_path_factory):
+    """A throwaway ed25519 key pair."""
+    path = tmp_path_factory.mktemp("keys") / "release"
+    subprocess.run(
+        ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(path)],
+        check=True,
+        capture_output=True,
+    )
+    return path
 
 
 class _Case:
@@ -155,9 +154,8 @@ class _Case:
         path.chmod(0o755)
 
     def run(self, shell: str, **extra):
-        argv = ["zsh", "-f"] if shell == "zsh" else ["bash"]
         return subprocess.run(
-            [self.env["PATH"] + "/" + argv[0], *argv[1:], "-c", _SNIPPET],
+            [*(["zsh", "-f"] if shell == "zsh" else ["bash"]), "-c", _SNIPPET],
             cwd=self.clone,
             env={**self.env, **extra},
             capture_output=True,
@@ -174,7 +172,6 @@ class _Case:
         ref = f"refs/tags/{_TAG}"
         local = self.git("rev-parse", ref)
         assert local == self.origin_git("rev-parse", ref)
-        assert self.git("cat-file", "-t", ref) == "tag"
         subject = self.git("tag", "-l", "--format=%(contents:subject)", _TAG)
         assert subject == f"agent-kit {_TAG}"
         commit = self.git("rev-parse", f"{ref}^{{commit}}")
@@ -184,13 +181,13 @@ class _Case:
             "-c",
             "gpg.ssh.allowedSignersFile=allowed_signers",
             "verify-tag",
-            _TAG,
+            ref,
         )
 
 
 @pytest.fixture
-def case(tmp_path, keys):
-    return _Case(tmp_path, keys[0])
+def case(tmp_path, key):
+    return _Case(tmp_path, key)
 
 
 @pytest.mark.parametrize("shell", _SHELLS)
@@ -201,7 +198,9 @@ def test_tags(case, shell):
 @pytest.mark.parametrize("shell", _SHELLS)
 def test_branch_named_like_the_tag(case, shell):
     case.git("branch", _TAG)
-    case.assert_released(case.run(shell))
+    done = case.run(shell)
+    case.assert_released(done)
+    assert "ambiguous" not in done.stderr
 
 
 @pytest.mark.parametrize("shell", _SHELLS)
@@ -237,8 +236,8 @@ def test_tag_exists(case, shell):
         f"tag {_TAG} already exists in this clone: if main's manifests "
         f"({_VERSION}) still name the last release, land the release pull "
         f"request first; if git ls-remote origin refs/tags/{_TAG} lists "
-        "it, only the release push is left (see below); otherwise a failed "
-        f"run left it: git tag -d {_TAG}"
+        'it, only the release push is left (README.md, "Releasing"); '
+        f"otherwise a failed run left it: git tag -d {_TAG}"
     ) in done.stderr
     assert case.git("rev-parse", f"refs/tags/{_TAG}") == before
 
@@ -269,6 +268,27 @@ def test_hidden_edit(case, shell, flag):
 
 
 @pytest.mark.parametrize("shell", _SHELLS)
+def test_push_mapping_cannot_force(case, shell):
+    case.git("tag", "-a", _TAG, "-m", "published")
+    case.git("push", "-q", "origin", f"refs/tags/{_TAG}")
+    published = case.origin_git("rev-parse", f"refs/tags/{_TAG}")
+    case.git("tag", "-d", _TAG)
+    case.git("config", "remote.origin.push", "+refs/tags/*:refs/tags/*")
+    done = case.run(shell)
+    assert done.returncode != 0
+    assert case.origin_git("rev-parse", f"refs/tags/{_TAG}") == published
+
+
+@pytest.mark.parametrize("shell", _SHELLS)
+def test_grep_fails(case, shell):
+    (Path(case.env["PATH"]) / "grep").unlink()
+    done = case.run(shell)
+    assert done.returncode != 0
+    assert _NOT_CLEAN in done.stderr
+    assert case.tags() == ""
+
+
+@pytest.mark.parametrize("shell", _SHELLS)
 def test_verify_fails(case, shell):
     revoked = case.clone.parent / "revoked"
     revoked.write_text(case.pub)
@@ -276,14 +296,59 @@ def test_verify_fails(case, shell):
     done = case.run(shell)
     assert done.returncode != 0
     assert _NOT_SIGNED in done.stderr
+    assert f"deleted local {_TAG}" in done.stderr
     assert case.tags() == ""
     assert case.tags(case.origin) == ""
 
 
 @pytest.mark.parametrize("shell", _SHELLS)
-def test_wrong_key(tmp_path, keys, shell):
+def test_verify_delete_fails(case, shell, tmp_path):
+    lock = case.clone / ".git" / "refs" / "tags" / f"{_TAG}.lock"
+    real = shlex.quote(str(shutil.which("ssh-keygen")))
+    wrapper = tmp_path / "signer.sh"
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        'case " $* " in\n'
+        f'  *" -Y sign "*) exec {real} "$@" ;;\n'
+        "esac\n"
+        f": > {shlex.quote(str(lock))}\n"
+        "exit 1\n"
+    )
+    wrapper.chmod(0o755)
+    case.git("config", "gpg.ssh.program", str(wrapper))
+    done = case.run(shell)
+    assert done.returncode != 0
+    assert _NOT_SIGNED in done.stderr
+    assert "deleted local" not in done.stderr
+    assert case.tags() == _TAG
+    assert case.tags(case.origin) == ""
+
+
+@pytest.mark.parametrize("shell", _SHELLS)
+def test_fsmonitor_hidden_edit(case, shell, tmp_path):
+    hook = tmp_path / "fsmon.sh"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "if [ -z \"$2\" ]; then printf 'tok1\\0/\\0'; "
+        "else printf 'tok1\\0'; fi\n"
+    )
+    hook.chmod(0o755)
+    case.git("config", "core.fsmonitor", str(hook))
+    case.git("status", "--porcelain")
+    case.git("status", "--porcelain")
+    manifest = case.clone / _MANIFESTS[0]
+    manifest.write_text(manifest.read_text() + "\n")
+    assert case.git("status", "--porcelain") == ""
+    done = case.run(shell)
+    assert done.returncode != 0
+    assert _NOT_CLEAN in done.stderr
+    assert case.tags() == ""
+
+
+@pytest.mark.parametrize("shell", _SHELLS)
+def test_wrong_key(tmp_path, key, shell):
     real = (_ROOT / "allowed_signers").read_text()
-    case = _Case(tmp_path, keys[1], signers=real)
+    case = _Case(tmp_path, key, signers=real)
     done = case.run(shell)
     assert done.returncode != 0
     assert "is not the release key" in done.stderr
