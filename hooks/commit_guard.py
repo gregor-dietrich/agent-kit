@@ -38,9 +38,11 @@ argument of its own; a command that does not tokenize at all; commits made
 outside the agent's shell tool; and squash or merge messages the forge
 composes.
 
-Behavior is pinned by tests/hooks/test_commit_guard.py — a crashed
-PreToolUse hook fails OPEN in the harness, so those tests are what notices
-a broken guard. Shared plumbing and the shell tokenizer live in hook_lib.py.
+Behavior is pinned by tests/hooks/test_commit_guard.py and, for the text
+forms it shares with the tea guard, tests/hooks/test_text_forms.py — a
+crashed PreToolUse hook fails OPEN in the harness, so those tests are what
+notices a broken guard. Shared plumbing and the shell tokenizer live in
+hook_lib.py.
 """
 
 import re

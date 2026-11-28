@@ -15,17 +15,14 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from bash_hook import run_agy_command_hook, run_bash_hook
+from bash_hook import deny_reason, run_agy_command_hook, run_bash_hook
 
 _ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _ROOT / "hooks" / "commit-guard.sh"
 
 
 def _reason(command: str) -> str:
-    """The deny reason the hook gives for *command*, or "" when it passes."""
-    out = run_bash_hook(_HOOK, command)
-    decision = json.loads(out)["hookSpecificOutput"] if out else {}
-    return decision.get("permissionDecisionReason", "")
+    return deny_reason(_HOOK, command)
 
 
 _HEREDOC = 'git commit -m "$(cat <<{delim}\n{body}\nEOF\n)"'

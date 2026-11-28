@@ -26,15 +26,18 @@ bypass, and each rule added to its shell reading is one more place for it
 to disagree with the shell. Not seen: a ``tea`` call inside an inner shell
 (``bash -c '...'``), in backticks, as the condition of ``if``, ``while`` or
 ``until``, or behind a wrapper the shared prefix list lacks (``timeout 30
-tea ...``); ``eval``; a shell function's body; a command word built from a
-variable; brace expansion; a quoted redirect operator passed as an argument
-of its own; a command that does not tokenize at all; and text piped into a
-comment that also has a body argument. ``tea issues create|edit`` is
-outside both rules; commit messages are the commit guard's (commit_guard.py).
+tea ...``); ``eval``; a shell function's body; a command word, group or
+subcommand built from a variable (``tea "$g" 5 ...``); brace expansion; a
+quoted redirect operator passed as an argument of its own; a command that
+does not tokenize at all; and text piped into a comment that also has a
+body argument. ``tea issues create|edit`` is outside both rules; commit
+messages are the commit guard's (commit_guard.py).
 
-Behavior is pinned by tests/hooks/test_tea_guard.py — a crashed PreToolUse
-hook fails OPEN in the harness, so those tests are what notices a broken
-guard. Shared plumbing and the shell tokenizer live in hook_lib.py.
+Behavior is pinned by tests/hooks/test_tea_guard.py and, for the text
+forms it shares with the commit guard, tests/hooks/test_text_forms.py — a
+crashed PreToolUse hook fails OPEN in the harness, so those tests are what
+notices a broken guard. hook_lib.py holds the shared plumbing and the shell
+tokenizer.
 """
 
 import re

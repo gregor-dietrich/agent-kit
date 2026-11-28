@@ -15,18 +15,14 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from bash_hook import run_agy_command_hook, run_bash_hook
+from bash_hook import deny_reason, run_agy_command_hook
 
 _ROOT = Path(__file__).resolve().parents[2]
 _HOOK = _ROOT / "hooks" / "tea-guard.sh"
 
 
 def _reason(command: str) -> str:
-    """The deny reason the hook gives for *command*, or "" when it passes."""
-    out = run_bash_hook(_HOOK, command)
-    if not out:
-        return ""
-    return json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+    return deny_reason(_HOOK, command)
 
 
 def _denied(command: str) -> bool:
@@ -176,6 +172,8 @@ def test_a_closing_keyword_is_denied(command: str) -> None:
         ('tea comment 5 "$(cat body.md)"', _EXPANSION),
         ('tea comment 5 "$body"', _EXPANSION),
         ("tea comment 5 `cat body.md`", _EXPANSION),
+        # tests/hooks/test_text_forms.py runs its forms as a comment only
+        ("tea pulls create -d $'[x]\\nfixes #3'", _EXPANSION),
         # A lone quote in an unquoted-delimiter body once unbalanced the
         # whole command, which then passed unread.
         (_HEREDOC.format(delim="EOF", body='He said "fixes #3'), _EXPANSION),

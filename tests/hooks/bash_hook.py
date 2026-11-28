@@ -25,6 +25,13 @@ def run_bash_hook(hook: Path, command: str, **env: str) -> str:
     )
 
 
+def deny_reason(hook: Path, command: str) -> str:
+    """The deny reason *hook* gives for *command*, or "" when it passes."""
+    out = run_bash_hook(hook, command)
+    decision = json.loads(out)["hookSpecificOutput"] if out else {}
+    return decision.get("permissionDecisionReason", "")
+
+
 def run_agy_command_hook(hook: Path, command: str, **env: str) -> str:
     payload: dict[str, object] = {
         "hookEventName": "PreToolUse",

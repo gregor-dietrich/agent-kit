@@ -6,12 +6,13 @@ malformed hook payload must never block a tool call — the PreToolUse deny
 envelope (Claude/Codex snake_case vs Antigravity camelCase), the path
 resolution for Claude edits, Codex patches and Antigravity file tools, and
 the shell tokenizer every Bash guard reads commands with. Shared by the
-guards that read what a command posts or records: ``CLOSING_KEYWORD`` and
-``EXPANSION``, the patterns for a closing or reopen keyword before an issue
-reference and for a shell expansion; ``unreadable``, the one rule for a token
-whose text cannot be read; ``FD``, the pattern for a redirect's
-file descriptor; ``lift_heredocs`` and ``restore_heredocs``, which take a
-quoted ``$(cat <<'EOF' ... EOF)`` body out of a command and put it back; and
+guards that read what a command posts or records: ``CLOSING_KEYWORD``, the
+pattern for a closing or reopen keyword before an issue reference;
+``unreadable``, the one rule for a token whose text cannot be read (a shell
+expansion, which ``EXPANSION`` matches, or a bare ``$``); ``FD``, the
+pattern for a redirect's file descriptor; ``lift_heredocs`` and
+``restore_heredocs``, which take a quoted ``$(cat <<'EOF' ... EOF)`` body out
+of a command and put it back; and
 ``command_words``, each simple command seen through ``( )``, ``$( )`` and
 shell words. ``git_subcommand``, a ``git`` call's subcommand past its global
 options, is shared by the pipe-status and commit guards. Import as a sibling
@@ -105,7 +106,7 @@ EXPANSION = re.compile(r"`|\$[A-Za-z0-9_{(@*#?!$-]")
 
 
 def unreadable(tok: str) -> str | None:
-    """The expansion *tok* holds, else a bare ``$`` or backtick, else None.
+    """The expansion *tok* holds, else a bare ``$``, else None.
 
     The one rule for text a guard cannot read, which both the tea and the
     commit guard point to.
@@ -124,9 +125,8 @@ def unreadable(tok: str) -> str | None:
     must pass. A variable argument can therefore still supply ``-m``
     itself. That is the commit guard's accepted limit.
     """
-    if found := EXPANSION.search(tok):
-        return found.group(0)
-    return next((c for c in "$`" if c in tok), None)
+    found = EXPANSION.search(tok)
+    return found.group(0) if found else ("$" if "$" in tok else None)
 
 
 # A number glued to a redirect operator is a descriptor (`2>&1`), not an

@@ -10,11 +10,10 @@ whose verdicts differ by design says so with a per-guard override and a
 ``why``.
 """
 
-import json
 from pathlib import Path
 
 import pytest
-from bash_hook import run_bash_hook
+from bash_hook import deny_reason
 
 _HOOKS = Path(__file__).resolve().parents[2] / "hooks"
 _KEYWORD = "closing or reopen keyword"
@@ -24,16 +23,8 @@ _HEREDOC = '{call} "$(cat <<{delim}\n{body}\nEOF\n)"'
 _QUOTED = 'costs $5, `x`, "q" and it\'s fine'
 
 
-def _reason(guard: str, command: str) -> str:
-    """The deny reason *guard* gives for *command*, or "" when it passes."""
-    out = run_bash_hook(_HOOKS / f"{guard}-guard.sh", command)
-    decision = json.loads(out)["hookSpecificOutput"] if out else {}
-    return decision.get("permissionDecisionReason", "")
-
-
 def _heredoc(delim: str, body: str) -> str:
-    # str.replace, not .format: the forms hold braces and `{call}` is filled
-    # later.
+    # str.replace, not .format: `{call}` is filled later.
     return _HEREDOC.replace("{delim}", delim).replace("{body}", body)
 
 
@@ -49,6 +40,7 @@ def _row(
     The tea verdict is the commit one unless *tea* overrides it, and then
     *why* says why they differ.
     """
+    assert (tea is None) == (not why), template
     return template, verdict, verdict if tea is None else tea, why
 
 
@@ -86,10 +78,10 @@ _ROWS = [
 @pytest.mark.parametrize(
     ("template", "commit", "tea", "why"), _ROWS, ids=[r[0] for r in _ROWS]
 )
-def test_a_text_form_gets_the_same_verdict_from_both_guards(
+def test_a_text_form_gets_its_stated_verdict_from_each_guard(
     guard: str, template: str, commit: str, tea: str, why: str
 ) -> None:
     command = template.replace("{call}", _CALLS[guard])
     expected = commit if guard == "commit" else tea
-    reason = _reason(guard, command)
+    reason = deny_reason(_HOOKS / f"{guard}-guard.sh", command)
     assert (expected in reason) if expected else (reason == ""), why
