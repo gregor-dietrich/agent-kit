@@ -34,7 +34,7 @@ setup that grows the way the original did.**
 | `hooks/commit_guard.py` | Denies a `git commit` or `git merge` whose message carries a closing or reopen keyword before `#N`, or whose message it cannot read | Any repository; silent on commands that are not a commit or merge |
 | `hooks/decisions_status_guard.py` | An agent may draft and amend decisions-log entries but not ratify, de-ratify or delete them | Repositories with a `docs/decisions.md` in the format below; a no-op elsewhere |
 | `hooks/prune_session_tmp.py` | At Claude Code and Codex session start (`hooks/hooks.json`; not registered in Antigravity's root `hooks.json`), in a detached background child, removes Claude Code session temp dirs under `claude-<uid>` untouched for 4 days, never the current or a running session. Tracks Claude Code internals as of 2.1.310 and stops pruning silently if they move | Linux; macOS unverified (#73); inert below Python 3.10 |
-| `hooks/hook_lib.py` | Shared plumbing: payload parse, deny envelope, shell tokenizer, Claude, Codex and Antigravity path resolution | Internal |
+| `hooks/hook_lib.py` | Shared plumbing: payload parse, deny envelope, shell tokenizer, the closing-keyword and expansion patterns, git subcommand reading, Claude, Codex and Antigravity path resolution | Internal |
 | `hooks/session-context.md` | The four delegation rules that hold on every dispatch, injected at session start | Any repository |
 | `skills/delegation` | Pinned-dispatch policy, per-client pins, the judgment threshold, cost reports | Any repository |
 | `skills/review-triage` | Context gathering, recording, `novel`/`instance` marks, finding destinations | Any repository; release bar comes from the project's decisions log |
@@ -63,14 +63,19 @@ the other shell, and the guard reads `$SHELL` to name the right one.
 
 The commit guard reads `git commit` and `git merge` messages given with
 `-m`/`--message`, literally or as a quoted `$(cat <<'EOF' ... EOF)`
-heredoc, and for `commit` its `--trailer` values, and denies one carrying
-a closing or reopen keyword before `#N`. It denies as unreadable a
-message holding a shell expansion, one taken from `-F`/`--file` (stdin
-included) and one left to the editor. It does not read messages git
-carries or prepares (`--amend --no-edit`, `-C`, `--fixup`, merge's own
-message, `revert`, `cherry-pick`, `rebase`), commands the tea guard's
-shell reading does not see, commits made outside the agent's shell tool,
-or the squash and merge messages the forge composes.
+heredoc (for `commit`, also its `--trailer` values), and denies one
+carrying a closing or reopen keyword before `#N`. It denies as unreadable
+a message holding a `$` or a backtick outside such a heredoc, even one the
+shell would leave literal; one taken from `-F`/`--file` (stdin included)
+or from a template with no `-m`; and one left to the editor. It does not
+read messages git carries or prepares (`--amend --no-edit`, `-C`,
+`--fixup`, merge's own message, `merge --continue`, `revert`,
+`cherry-pick`, `rebase`), abbreviated long options (`--mess=`), git
+aliases, an expansion outside the message values (a variable argument can
+supply `-m` itself), commands the shared shell reading does not see,
+commits made outside the agent's shell tool, or the squash and merge
+messages the forge composes. `hooks/commit_guard.py` lists the limits in
+full.
 
 ### The decisions-log format the guard reads
 

@@ -8,3 +8,7 @@ commit = "3fc9ed03eebdde6ceb696fd9e5c3ea286281868d"
 [python.duplication]
 paths = ["hooks", "tests"]
 
+[[python.duplication.accepted]]
+files = ["hooks/commit_guard.py", "hooks/tea_guard.py"]
+reason = "Both guards import the same hook_lib names and open main() with the same payload, heredoc and descriptor reads."
+max-tokens = 109

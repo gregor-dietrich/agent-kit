@@ -13,11 +13,14 @@ import pytest
 
 import hook_lib
 from hook_lib import (
+    FD,
     changed_paths,
     command_text,
     effective_tool,
     is_antigravity_payload,
+    logical_lines,
     payload_cwd,
+    restore_heredocs,
     simple_commands,
     tool_input,
     tool_name,
@@ -128,6 +131,26 @@ def test_multiline_reads_a_quoted_heredoc_operator_as_text() -> None:
 def test_multiline_still_drops_an_unquoted_heredoc_body() -> None:
     text = "git commit -F - <<'EOF'\nit's `tea issues 1`\nEOF\nls"
     assert [n for n, _ in _multiline(text)] == ["git", "ls"]
+
+
+def test_an_escaped_space_leaves_a_hash_a_plain_character() -> None:
+    # `fixes\\ #3` is one word to the shell; after a plain space the `#`
+    # starts a comment.
+    assert logical_lines("git commit -m fixes\\ #3") == [
+        "git commit -m fixes\\ #3"
+    ]
+    assert logical_lines("git commit -m fixes #3") == ["git commit -m fixes "]
+
+
+def test_a_placeholder_too_long_to_be_one_is_left_alone() -> None:
+    tok = f"\x1f{'1' * 7}\x1f"
+    assert restore_heredocs(tok, ["body"]) == tok
+    assert restore_heredocs("\x1f0\x1f", ["body"]) == "body"
+
+
+def test_fd_strips_a_descriptor_and_keeps_an_index() -> None:
+    assert FD.sub("", "make 2>&1 | tee x") == "make >&1 | tee x"
+    assert FD.sub("", "echo #3>") == "echo #3>"
 
 
 def test_multiline_unbalanced_quote_falls_back_to_physical_lines() -> None:

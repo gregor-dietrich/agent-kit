@@ -10,6 +10,7 @@ no deliberate ``Closes #N`` line.)
 """
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -23,12 +24,8 @@ _HOOK = _ROOT / "hooks" / "commit-guard.sh"
 def _reason(command: str) -> str:
     """The deny reason the hook gives for *command*, or "" when it passes."""
     out = run_bash_hook(_HOOK, command)
-    reason = json.loads(out)["hookSpecificOutput"] if out else {}
-    return reason.get("permissionDecisionReason", "")
-
-
-def _denied(command: str) -> bool:
-    return bool(_reason(command))
+    decision = json.loads(out)["hookSpecificOutput"] if out else {}
+    return decision.get("permissionDecisionReason", "")
 
 
 _HEREDOC = 'git commit -m "$(cat <<{delim}\n{body}\nEOF\n)"'
@@ -64,6 +61,19 @@ _EDITOR = "takes its message from an editor"
         "(git commit -m 'fixes #3')",
         "git add . && git commit -m 'fixes #3'",
         'if true; then git commit -m "fixes #3"; fi',
+        "{ git commit -m 'fixes #3'; }",
+        "! git commit -m 'fixes #3'",
+        "x=$(git commit -m 'fixes #3')",
+        # a trailer is recorded as `token: value`
+        "git commit -m ok --trailer 'Closes=#3'",
+        "git commit -m ok --trailer=Fixes=#3",
+        "git commit -m ok --trailer 'Fixes = #3'",
+        "git commit -m ok --trailer 'Fixes :#3'",
+        # a descriptor before the message, an escaped space, real newlines
+        "git commit -m 2>/dev/null 'fixes #3'",
+        "git commit -m fixes\\ #3",
+        'git commit -m "Title\n\nfixes #3"',
+        _HEREDOC.format(delim="-'EOF'", body="line one\nfixes #3"),
     ],
 )
 def test_a_closing_keyword_is_denied(command: str) -> None:
@@ -101,6 +111,17 @@ def test_a_closing_keyword_is_denied(command: str) -> None:
         ("git commit --no-edit -c HEAD", _EDITOR),
         ("git merge -e topic", _EDITOR),
         ("git merge --edit topic", _EDITOR),
+        ("git commit -unormal", _EDITOR),
+        # `$` and a backtick are unreadable even where the shell keeps them
+        ("git commit -m $'[tag] Add X\\n\\nFixes #3'", _EXPANSION),
+        ("git commit -m 'costs $5'", _EXPANSION),
+        ("git commit -m 'a $ b'", _EXPANSION),
+        ("git commit -m 'Move `foo` into lib'", _EXPANSION),
+        # a template is a file, unless a message or -C settles it
+        ("git commit -t m", _FILE),
+        ("git commit -t m --no-edit --allow-empty-message", _FILE),
+        ("git commit --template=m --no-edit", _FILE),
+        ("git commit --file", _FILE),
     ],
 )
 def test_a_message_the_guard_cannot_read_is_denied(
@@ -116,9 +137,13 @@ def test_the_deny_reasons_name_the_subcommand_and_the_match() -> None:
     assert "git merge takes" in _reason("git merge -e t")
     assert "('$x')" in _reason('git commit -m "$x"')
     assert "('msg')" in _reason("git commit -F msg")
+    assert "('m')" in _reason("git commit -t m")
+    assert "git merge -m" in _reason('git merge t -m "$x"')
+    assert "git merge -m" in _reason("git merge t -F msg")
+    assert "git commit -m" in _reason("git commit -F msg")
 
 
-def test_the_file_rule_precedes_the_others() -> None:
+def test_the_checks_run_file_editor_expansion_keyword() -> None:
     assert _FILE in _reason("git commit -F msg -m 'fixes #3' -e")
     assert _EDITOR in _reason('git commit -e -m "$x"')
     assert _EXPANSION in _reason("git commit -m \"$x\" -m 'fixes #3'")
@@ -136,6 +161,19 @@ def test_the_file_rule_precedes_the_others() -> None:
         "git commit -am",
         "git commit -m ok -- 'fix #3.txt'",
         "git commit -m ok --trailer 'Co-Authored-By: x'",
+        "git commit -m ok --trailer 'Co-Authored-By: x <a=b>'",
+        "git commit -h",
+        "git commit --help",
+        "git --help commit",
+        "git -h commit",
+        "git commit -Cdeadbeef",
+        "git commit -tfile -m ok",
+        "git commit -t m -C HEAD",
+        "git merge -Xtheirs topic",
+        "git merge -sresolve topic",
+        "git commit --message",
+        # a placeholder-like token too long to be one
+        f"git commit -m '\x1f{'1' * 5000}\x1f'",
         "git commit -uno -m ok",
         "git commit -Skey -m ok",
         "git commit -S -m ok",
@@ -167,8 +205,6 @@ def test_the_file_rule_precedes_the_others() -> None:
         "git commit -m ok -- -F",
         "git commit -m ok -",
         "git commit -m ok -- x",
-        # not a git call
-        "tea comment 5 'commit fixes #3 merge'",
         # the prefilter's first case matches, the tokenizer finds no call
         "git commit -m 'unterminated",
     ],
@@ -177,9 +213,29 @@ def test_reworded_and_unrelated_commands_are_allowed(command: str) -> None:
     assert _reason(command) == ""
 
 
-def test_a_payload_the_prefilter_does_not_match_is_ignored() -> None:
-    assert _reason("git status 'fixes #3'") == ""
-    assert _reason("echo commit -m 'fixes #3'") == ""
+def test_a_long_hyphenated_message_does_not_hang_the_keyword_pattern() -> None:
+    # An unbounded pattern backtracks past the helper's subprocess timeout.
+    # Not a parameter: pytest puts a test id in the environment, and this
+    # command is too long for it.
+    command = _HEREDOC.format(delim="'EOF'", body="fix-" * 50000)
+    assert _reason(command) == ""
+
+
+def test_a_payload_the_prefilter_does_not_match_is_ignored(
+    tmp_path: Path,
+) -> None:
+    # A stub python3 first on PATH marks every call that reaches Python.
+    stub = tmp_path / "python3"
+    stub.write_text("#!/bin/sh\necho STUB\n", encoding="utf-8")
+    stub.chmod(0o755)
+    env = {"PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}"}
+    for command in (
+        "git status 'fixes #3'",
+        "echo commit -m 'fixes #3'",
+        "tea comment 5 'commit fixes #3 merge'",
+    ):
+        assert run_bash_hook(_HOOK, command, **env) == ""
+    assert run_bash_hook(_HOOK, "git commit -m ok", **env) == "STUB\n"
 
 
 def test_malformed_payload_fails_open() -> None:

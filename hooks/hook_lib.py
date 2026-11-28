@@ -8,12 +8,13 @@ resolution for Claude edits, Codex patches and Antigravity file tools, and
 the shell tokenizer every Bash guard reads commands with. Shared by the
 guards that read what a command posts or records: ``CLOSING_KEYWORD`` and
 ``EXPANSION``, the patterns for a closing or reopen keyword before an issue
-reference and for a shell expansion; ``lift_heredocs`` and
-``restore_heredocs``, which take a quoted ``$(cat <<'EOF' ... EOF)`` body out
-of a command and put it back; ``command_words``, each simple command seen
-through ``( )``, ``$( )`` and shell words; and ``git_subcommand``, a ``git``
-call's subcommand past its global options. Import as a
-sibling module (``import hook_lib``; hooks run by path, so this directory is
+reference and for a shell expansion; ``FD``, the pattern for a redirect's
+file descriptor; ``lift_heredocs`` and ``restore_heredocs``, which take a
+quoted ``$(cat <<'EOF' ... EOF)`` body out of a command and put it back; and
+``command_words``, each simple command seen through ``( )``, ``$( )`` and
+shell words. ``git_subcommand``, a ``git`` call's subcommand past its global
+options, is shared by the pipe-status and commit guards. Import as a sibling
+module (``import hook_lib``; hooks run by path, so this directory is
 already on ``sys.path``).
 """
 
@@ -90,14 +91,19 @@ LOOKUP_PREFIXES = {"command", "builtin"}
 LOOKUP_FLAGS = {"-v", "-V"}
 
 # A closing or reopen keyword directly before an issue reference: the forge
-# acts on it wherever it stands.
+# acts on it wherever it stands. The repository-name runs are bounded: an
+# unbounded `[\w.-]+/` retried from every start of a long hyphenated run
+# (`fix-fix-...`) backtracks quadratically, past the hook timeout.
 CLOSING_KEYWORD = re.compile(
     r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|reopen(?:s|ed)?):?[ \t]*"
-    r"(?:[\w.-]+/[\w.-]+)?#\d+",
+    r"(?:[\w.-]{1,100}/[\w.-]{1,100})?#\d+",
     re.IGNORECASE,
 )
 # A shell expansion: the text it stands in cannot be read from the command.
 EXPANSION = re.compile(r"`|\$[A-Za-z0-9_{(@*#?!$-]")
+# A number glued to a redirect operator is a descriptor (`2>&1`), not an
+# index; `tea issues 2 > out` keeps its `2`.
+FD = re.compile(r"(?<![\w.$#-])\d+(?=[<>])")
 # Words the shell allows in front of a command, and `(`/`)` around one.
 SHELL_WORDS = {"{", "}", "!", "then", "do", "else"}
 _REDIRECT = re.compile(r"[<>&|]+")
@@ -109,7 +115,7 @@ _HEREDOC_SUB = re.compile(
     r"(?:(.*?)\n)?[ \t]*\2\s*\)",
     re.DOTALL,
 )
-_PLACEHOLDER = re.compile("\x1f(\\d+)\x1f")
+_PLACEHOLDER = re.compile("\x1f(\\d{1,6})\x1f")
 # git's global options that take their value as the NEXT word; every other
 # option is one token (`--git-dir=x`, `--no-pager`, `-p`).
 GIT_OPTS_WITH_VALUE = {
@@ -161,8 +167,9 @@ def logical_lines(text: str) -> list[str] | None:
     command tokenizes whole. Outside single quotes a backslash escapes the
     next character, and a backslash-newline pair is a line continuation and
     is removed. A ``#`` at the start of the text or after whitespace, ``;``,
-    ``&``, ``|`` or ``(`` begins a comment, which is dropped to the end of
-    its line, so an apostrophe in one opens no quote. A heredoc
+    ``&``, ``|`` or ``(`` begins a comment, unless that character is
+    backslash-escaped (``fixes\\ #3`` is one word); the comment is dropped to
+    the end of its line, so an apostrophe in one opens no quote. A heredoc
     body is dropped, as :func:`strip_heredocs` drops it, but only where its
     ``<<`` stands outside quotes: quoted, it is text (``"cout << x"``), and
     reading it as a heredoc swallowed the rest of the command. A quote still
@@ -174,18 +181,22 @@ def logical_lines(text: str) -> list[str] | None:
     delims: list[str] = []
     quote = ""
     i = 0
+    escaped_end = -1  # index just past the last backslash-escaped character
     while i < len(text):
         ch = text[i]
         if ch == "\\" and quote != "'" and i + 1 < len(text):
             if text[i + 1] != "\n":
                 cur.append(text[i : i + 2])
+                escaped_end = i + 2
             i += 2
             continue
         if quote:
             quote = "" if ch == quote else quote
         elif ch in "'\"":
             quote = ch
-        elif ch == "#" and (i == 0 or text[i - 1] in " \t\n;&|("):
+        elif ch == "#" and (
+            i == 0 or (i != escaped_end and text[i - 1] in " \t\n;&|(")
+        ):
             end = text.find("\n", i)
             i = len(text) if end < 0 else end
             continue
@@ -370,12 +381,15 @@ def _without_redirects(args: list[str]) -> list[str]:
 
 
 def command_words(cmd: str) -> list[tuple[str, list[str]]]:
-    """Each simple command, entered through `( )`, `$( )` and shell words.
+    """Each simple command as (tool, args), seen through `( )` and `$( )`.
 
-    `pr=$(tea pulls create ...)`, `(tea ...)`, `{ tea ...; }`, `! tea ...`
-    and the body of an `if` or a loop hide the command word behind a token
-    the tokenizer leaves in place. A wrapper (`command`, `env`, ...) is
-    unwrapped; redirects are dropped.
+    Unlike :func:`simple_commands`, which yields each command as the
+    tokenizer splits it, this also enters `( )` and `$( )`, skips shell
+    words and assignments before the command word, unwraps a wrapper
+    through :func:`effective_tool`, and drops redirects. `x=$(git log)`,
+    `(make test)`, `{ git commit -m x; }`, `! grep y f` and the body of an
+    `if` or a loop all yield their command (`git`, `make`, `git`, `grep`),
+    where `simple_commands` leaves the word behind the token in front.
     """
     out: list[tuple[str, list[str]]] = []
     for first, tail in simple_commands(cmd, multiline=True):

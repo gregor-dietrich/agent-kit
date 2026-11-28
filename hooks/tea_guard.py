@@ -39,6 +39,7 @@ import re
 from hook_lib import (
     CLOSING_KEYWORD,
     EXPANSION,
+    FD,
     command_text,
     command_words,
     deny,
@@ -81,9 +82,6 @@ PULL_GUARDED = {"approve", "lgtm", "a", "reject", "reply", "merge", "m"}
 PULL_ADMITTING = {"create", "c", "edit", "e"}
 DESCRIPTION_FLAGS = {"-d", "--description"}
 DESCRIPTION_PREFIXES = ("-d=", "--description=")
-# A number glued to a redirect operator is a descriptor (`2>&1`), not an
-# index; `tea issues 2 > out` keeps its `2`.
-_FD = re.compile(r"(?<![\w.$#-])\d+(?=[<>])")
 _CLOSES_LINE = re.compile(r"^[ \t]*Closes #\d+[ \t]*$", re.MULTILINE)
 
 _KEYWORD_MSG = (
@@ -138,7 +136,6 @@ def _posted(rest: list[str], bodies: list[str], admit: bool) -> list[str]:
     An admitting call's description, and nothing else, loses its
     `Closes #N` lines.
     """
-
     out = []
     for i, tok in enumerate(rest):
         text = restore_heredocs(tok, bodies)
@@ -185,7 +182,7 @@ def _check_write(group: str, rest: list[str], bodies: list[str]) -> None:
 def main() -> None:
     cmd = command_text(tool_input(read_payload()))
     cmd, bodies = lift_heredocs(cmd)
-    for name, args in command_words(_FD.sub("", cmd)):
+    for name, args in command_words(FD.sub("", cmd)):
         # tea's own global flags (`tea --debug comment ...`) take no value.
         while args and args[0].startswith("-"):
             args = args[1:]
