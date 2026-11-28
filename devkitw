@@ -2,12 +2,12 @@
 # devkitw: fetch the devkit commit pinned in ./devkit.toml into a per-user
 # cache, point ./.devkit at it and print its path. A project commits this file
 # verbatim; `make lint-devkitw` notices a copy older than the pin's.
-# devkitw revision 3
+# devkitw revision 4
 # Usage, from the project root: ./devkitw [path]
 set -eu
 
 die() {
-  echo "devkitw: $*" >&2
+  printf 'devkitw: %s\n' "$*" >&2
   exit 1
 }
 
@@ -17,7 +17,7 @@ signers='devkit-release namespaces="git" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAO
 case $#:${1-} in
   0: | 1:path) ;;
   *)
-    echo "devkitw: unknown argument '$*'; usage: devkitw [path]" >&2
+    printf '%s\n' "devkitw: unknown argument '$*'; usage: devkitw [path]" >&2
     exit 2
     ;;
 esac
@@ -42,9 +42,11 @@ root=${XDG_CACHE_HOME:-$HOME/.cache}/devkit
 case $root in /*) ;; *) die "cache root $root is not an absolute path" ;; esac
 dir=$root/$commit mark=.devkit-commit # the marker holds "<commit> <version>"
 
-# g ARGS...: git in the temp dir, without hooks, credential helpers or prompts.
+# g ARGS...: git in the temp dir, without hooks, credential helpers or prompts,
+# and under $to (set before the first call) where a timeout(1) is found.
 g() {
-  git -c core.hooksPath=/dev/null -c credential.helper= \
+  # shellcheck disable=SC2086 # $to is a command with its arguments, or empty
+  $to git -c core.hooksPath=/dev/null -c credential.helper= \
     -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 -C "$tmp" "$@"
 }
 
@@ -53,7 +55,6 @@ g() {
 # not use git verify-tag, so no gpg.* setting, GNUPGHOME or ~/.ssh is read. The
 # scratch files go in .git, which is removed before the tree is sealed.
 verify_release() {
-  vr=$tmp/.git/devkitw-
   [ "$(g cat-file -t "refs/tags/$version")" = tag ] ||
     die "tag $version is not an annotated tag; refusing $commit"
   g cat-file tag "refs/tags/$version" >"${vr}tag"
@@ -107,10 +108,35 @@ elif [ -z "$cached" ]; then
   # shellcheck disable=SC2046
   unset $(git rev-parse --local-env-vars)
   # ConnectTimeout bounds the connect and handshake; the keepalives drop a
-  # connection whose server stops answering. A live server whose git stalls
-  # is not bounded, over ssh or (above 1000 bytes/s) over HTTPS.
+  # connection whose server stops answering. A live server whose git stalls,
+  # over ssh or (at 1000 bytes/s or more) over HTTPS, is bounded by $to alone.
   : "${GIT_SSH_COMMAND:=ssh -o BatchMode=yes -o ConnectTimeout=10 \
     -o ServerAliveInterval=10 -o ServerAliveCountMax=2}"
+  # Where a timeout(1) is found, each git that g runs is stopped after 300
+  # seconds. It counts only when PATH holds it no later than git's directory:
+  # an earlier directory could replace git anyway, a later one gets to run
+  # nothing new, which is also why the probe runs git and not true.
+  # --foreground (GNU) leaves git the terminal, for an interrupt and for an ssh
+  # that prompts; busybox's has no such option and needs none. Either way the
+  # stop reaches git alone: what git started (its ssh, its HTTPS helper and
+  # what they run) may live on, and a server may keep sending to it. Without
+  # such a timeout(1) nothing bounds that server.
+  to='' tp='' p=:$PATH: gd=$(command -v git)
+  case $gd in */*) gd=${gd%/*} ;; *) gd=$p ;; esac # no directory: no match
+  case $p in
+    *":$gd:"*) # $p becomes PATH up to git's directory
+      p=${p%%":$gd:"*}:$gd
+      tp=$(PATH=${p#:} command -v timeout) || :
+      ;;
+  esac
+  for o in '--foreground 300' 300; do
+    # shellcheck disable=SC2086 # $o is an option and a duration, or a duration
+    # -x: busybox sh finds a file it cannot run, then runs a later one.
+    if [ -x "$tp" ] && timeout $o git --version >/dev/null 2>&1; then
+      to="timeout $o"
+      break
+    fi
+  done
   # Fail rather than prompt. GIT_TERMINAL_PROMPT=0 does not stop git asking an
   # askpass (GIT_ASKPASS, core.askPass, SSH_ASKPASS); an empty GIT_ASKPASS does.
   export GIT_SSH_COMMAND GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=
@@ -119,17 +145,51 @@ elif [ -z "$cached" ]; then
   trap 'chmod -R u+w "$tmp" 2>/dev/null || :; rm -rf "$tmp"' EXIT
   trap 'exit 1' HUP INT TERM
   g init -q
+  vr=$tmp/.git/devkitw-
   # Fetch main too: anyone who can push a tag can put it on any commit, so the
   # commit must also be on main. The mirror stands in only for an unreachable
-  # url, never for one that lacks the tag or main.
+  # url (one whose ls-remote fails), because the contract reserves it for that.
+  # git's stderr is kept for the one line naming the cause: cut to its last
+  # 2000 bytes, with its control characters (ASCII ones, and the UTF-8 encoded
+  # U+0080-U+009F) turned into spaces, so a remote cannot put terminal escapes
+  # or megabytes into a CI log; the cut may fall inside a character, whose
+  # leftover bytes are dropped. die prints with printf because echo would
+  # expand backslash escapes in that text.
+  c1=$(printf '\302')[$(printf '\200')-$(printf '\237')]
+  cb=[$(printf '\200')-$(printf '\277')] # a UTF-8 continuation byte
+  fails=
   for remote in "$url" ${mirror:+"$mirror"}; do
+    rc=0
+    # A fresh file: what a stopped fetch started may still write to the last.
+    rm -f "${vr}fetch"
     g fetch -q --no-tags -- "$remote" "refs/tags/$version:refs/tags/$version" \
-      refs/heads/main:refs/devkit/main 2>/dev/null && break
-    [ "$remote" != "$url" ] || ! g ls-remote -q -- "$url" >/dev/null 2>&1 ||
-      die "$url serves no tag $version, or no main"
+      refs/heads/main:refs/devkit/main 2>"${vr}fetch" || rc=$?
+    [ "$rc" != 0 ] || break
+    msg=$(tail -c 2000 "${vr}fetch" | LC_ALL=C tr -s '\000-\037\177' ' ' |
+      LC_ALL=C sed -e "s/^$cb*//" -e "s/$c1/ /g" -e 's/  */ /g') || msg=
+    msg=${msg# }
+    msg=${msg% }
+    # 124 is GNU timeout's status for a command it stopped; $to ends in the
+    # seconds. busybox's leaves 143, as any SIGTERM does, and the shell's own
+    # note ("Terminated") after what git wrote: g's stderr is the shell's too.
+    [ -z "$to" ] || [ "$rc" != 124 ] ||
+      msg="timed out after ${to##* } seconds${msg:+: $msg}"
+    msg=${msg:-git fetch exited $rc}
+    if [ "$remote" = "$url" ] &&
+      g ls-remote -q -- "$url" "refs/tags/$version" refs/heads/main \
+        >"${vr}refs" 2>/dev/null; then
+      # Patterns tail-match: compare the ref names whole.
+      if cut -f2 "${vr}refs" | grep -Fxq -e "refs/tags/$version" &&
+        cut -f2 "${vr}refs" | grep -Fxq -e refs/heads/main; then
+        die "fetch from $url failed: $msg"
+      fi
+      die "$url serves no tag $version, or no main: $msg"
+    fi
+    fails="${fails:+$fails; }$remote: $msg"
   done
-  got=$(g rev-parse -q --verify "refs/tags/$version^{commit}") ||
-    die "cannot fetch tag $version and main from $url${mirror:+ or $mirror}"
+  [ "$rc" = 0 ] || die "cannot fetch tag $version and main: $fails"
+  got=$(g rev-parse -q --verify "refs/tags/$version^{commit}" 2>/dev/null) ||
+    die "tag $version from $remote is not a tag of a commit"
   [ "$got" = "$commit" ] || die "tag $version is $got, not the pinned $commit"
   verify_release
   g merge-base --is-ancestor "$commit" refs/devkit/main ||

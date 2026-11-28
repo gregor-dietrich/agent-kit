@@ -2,8 +2,8 @@
 # together, and copy devkitw from the new tag when it changed.
 [devkit]
 url = "ssh://git@git.vptr.de:222/gregor/devkit.git"
-version = "v0.8.0"
-commit = "3fc9ed03eebdde6ceb696fd9e5c3ea286281868d"
+version = "v0.10.0"
+commit = "527e313a3b44a3053160cd66595be3eb7ae88676"
 
 [python.duplication]
 paths = ["hooks", "tests"]
