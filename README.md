@@ -274,7 +274,7 @@ from the manifests and is signed with a dedicated SSH release key
    version: it tags the one the three manifests on `main` declare, so it
    runs only after step 3. Before that the manifests still name the last
    release, and it stops at "tag ... already exists". It needs git 2.35
-   or later, ssh-keygen (OpenSSH 8.1 or later), and the release key's
+   or later, ssh-keygen (OpenSSH 8.2 or later), and the release key's
    private key file
    (`SHA256:dYsHxqttXNQpFhcKpXte7CSrVi2uHdexcEBomV0SHCE`) at
    `~/.ssh/id_agent_kit`, or at the path `AGENT_KIT_RELEASE_KEY` names;
@@ -316,8 +316,8 @@ from the manifests and is signed with a dedicated SSH release key
    `git push origin "vX.Y.Z^{commit}:refs/heads/release"`.
 
    The release key signs agent-kit's release tags and nothing else: a
-   signature binds the tag object (its commit, tag name, tagger and
-   message) and the namespace, not the repository. To check a tag
+   signature binds the tag object (its commit, type, tag name, tagger
+   and message) and the namespace, not the repository. To check a tag
    against the pinned key, run
    `git -c gpg.ssh.allowedSignersFile=allowed_signers verify-tag vX.Y.Z`.
    Tags before `v0.6.0` carry no signature.
