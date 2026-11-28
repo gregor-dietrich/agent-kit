@@ -14,9 +14,9 @@ a shell expansion (an unquoted heredoc included), one taken from
 (``-t``), and, for ``commit``, one left to the editor (``-e``, ``-c``, or no
 message and no flag that settles one). A message holding a ``$`` or a
 backtick outside a quoted heredoc is denied even when the shell would leave
-it literal (``'costs $5'``), because the tokenizer drops the quoting. For
-``merge`` only ``-e``/``--edit`` is denied: without ``-m`` git prepares the
-message itself.
+it literal (``'costs $5'``), because the tokenizer drops the quoting; see
+``hook_lib.unreadable``. For ``merge`` only ``-e``/``--edit`` is denied:
+without ``-m`` git prepares the message itself.
 
 Accepted limits: the guard catches ordinary commits, not a determined
 bypass. Not read: messages git carries or prepares (``--amend
@@ -27,15 +27,15 @@ number), ``rebase``, ``pull``, ``commit-tree``), abbreviated long options
 backticks, as the condition of ``if``, ``while`` or ``until``, or behind a
 wrapper the shared prefix list lacks (``timeout 30 git ...``); an expansion
 outside the message values (a variable argument, ``"$@"``, a subcommand
-built from a variable), which can supply a message option itself (unlike the
-tea guard, this guard checks only message values for expansions); git
-aliases and ``help.autocorrect``; a negated option that unsets an earlier
-one (``--no-message``, ``--no-dry-run``); ``git merge --continue``; a
-template named by ``commit.template``; ``eval``; a shell function's body; a
-redirect standing before the subcommand (``git 2>x commit``); a command word
-built from a variable; brace expansion; a quoted redirect operator passed as
-an argument of its own; a command that does not tokenize at all; commits
-made outside the agent's shell tool; and squash or merge messages the forge
+built from a variable), which can supply a message option itself (the scope
+is set out in ``hook_lib.unreadable``); git aliases and
+``help.autocorrect``; a negated option that unsets an earlier one
+(``--no-message``, ``--no-dry-run``); ``git merge --continue``; a template
+named by ``commit.template``; ``eval``; a shell function's body; a redirect
+standing before the subcommand (``git 2>x commit``); a command word built
+from a variable; brace expansion; a quoted redirect operator passed as an
+argument of its own; a command that does not tokenize at all; commits made
+outside the agent's shell tool; and squash or merge messages the forge
 composes.
 
 Behavior is pinned by tests/hooks/test_commit_guard.py — a crashed
@@ -47,7 +47,6 @@ import re
 
 from hook_lib import (
     CLOSING_KEYWORD,
-    EXPANSION,
     FD,
     command_text,
     command_words,
@@ -57,6 +56,7 @@ from hook_lib import (
     read_payload,
     restore_heredocs,
     tool_input,
+    unreadable,
 )
 
 # The subcommands whose message the guard reads.
@@ -187,13 +187,6 @@ def _settles_message(name: str, value: str | None) -> bool:
     )
 
 
-def _expansion(tok: str) -> str | None:
-    """The expansion *tok* holds, else a bare ``$`` or backtick, else None."""
-    if found := EXPANSION.search(tok):
-        return found.group(0)
-    return next((c for c in "$`" if c in tok), None)
-
-
 def _messages(
     sub: str, args: list[str], bodies: list[str]
 ) -> tuple[list[str], str | None]:
@@ -237,7 +230,7 @@ def _messages(
             text = restore_heredocs(tok, bodies)
             texts += [text, _TRAILER_SEP.sub(r"\1: ", text, count=1)]
     for tok in tokens:
-        if found := _expansion(tok):
+        if found := unreadable(tok):
             return [], _EXPANSION_MSG.format(sub=sub, found=found)
     return texts, None
 

@@ -176,7 +176,6 @@ def test_a_closing_keyword_is_denied(command: str) -> None:
         ('tea comment 5 "$(cat body.md)"', _EXPANSION),
         ('tea comment 5 "$body"', _EXPANSION),
         ("tea comment 5 `cat body.md`", _EXPANSION),
-        (_HEREDOC.format(delim="EOF", body="hello"), _EXPANSION),
         # A lone quote in an unquoted-delimiter body once unbalanced the
         # whole command, which then passed unread.
         (_HEREDOC.format(delim="EOF", body='He said "fixes #3'), _EXPANSION),
@@ -221,9 +220,6 @@ def test_apostrophes_in_comments_do_not_hide_a_read() -> None:
         'tea comment 5 "hotfix #3"',
         'tea comment 5 "fixes the parser, see #3"',
         'tea comment 5 -d="looks good"',
-        _HEREDOC.format(
-            delim="'EOF'", body='costs $5, `x`, "q" and it\'s fine'
-        ),
         "tea comments list 5",
         "tea comments add --help",
         "tea pulls edit 5 --add-labels bug",

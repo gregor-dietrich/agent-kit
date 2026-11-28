@@ -17,17 +17,20 @@ reject|reply|merge``) carrying one is denied, and so is one whose text the
 guard cannot read (an expansion, ``--description-file``, a comment with no
 body argument): a call it has read but cannot model is denied. The one
 admitted form is a line holding only ``Closes #N`` in a PR description.
+Text holding a ``$`` or a backtick outside a quoted heredoc is denied even
+where the shell would leave it literal; ``hook_lib.unreadable`` holds the
+rule and its scope (every argument of a guarded write here).
 
 Accepted limits: the guard catches ordinary posting, not a determined
 bypass, and each rule added to its shell reading is one more place for it
 to disagree with the shell. Not seen: a ``tea`` call inside an inner shell
 (``bash -c '...'``), in backticks, as the condition of ``if``, ``while`` or
 ``until``, or behind a wrapper the shared prefix list lacks (``timeout 30
-tea ...``); a command word built from a variable; brace expansion; a
-quoted redirect operator passed as an argument of its own; a command that
-does not tokenize at all; and text piped into a comment that also has a
-body argument. ``tea issues create|edit`` is outside both rules; commit
-messages are the commit guard's (commit_guard.py).
+tea ...``); ``eval``; a shell function's body; a command word built from a
+variable; brace expansion; a quoted redirect operator passed as an argument
+of its own; a command that does not tokenize at all; and text piped into a
+comment that also has a body argument. ``tea issues create|edit`` is
+outside both rules; commit messages are the commit guard's (commit_guard.py).
 
 Behavior is pinned by tests/hooks/test_tea_guard.py — a crashed PreToolUse
 hook fails OPEN in the harness, so those tests are what notices a broken
@@ -38,7 +41,6 @@ import re
 
 from hook_lib import (
     CLOSING_KEYWORD,
-    EXPANSION,
     FD,
     command_text,
     command_words,
@@ -47,6 +49,7 @@ from hook_lib import (
     read_payload,
     restore_heredocs,
     tool_input,
+    unreadable,
 )
 
 READ_SUBCOMMANDS = {"issue", "issues", "pull", "pulls", "pr"}
@@ -160,8 +163,8 @@ def _check_write(group: str, rest: list[str], bodies: list[str]) -> None:
     if any(t.startswith("--description-file") for t in rest):
         deny(_FILE_MSG)
     for tok in rest:
-        if found := EXPANSION.search(tok):
-            deny(_EXPANSION_MSG.format(found=found.group(0)))
+        if found := unreadable(tok):
+            deny(_EXPANSION_MSG.format(found=found))
     texts = _posted(rest, bodies, admit)
     if comment:
         # An index (after `add`/`edit`, when spelled out), then the body,

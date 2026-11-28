@@ -8,7 +8,8 @@ resolution for Claude edits, Codex patches and Antigravity file tools, and
 the shell tokenizer every Bash guard reads commands with. Shared by the
 guards that read what a command posts or records: ``CLOSING_KEYWORD`` and
 ``EXPANSION``, the patterns for a closing or reopen keyword before an issue
-reference and for a shell expansion; ``FD``, the pattern for a redirect's
+reference and for a shell expansion; ``unreadable``, the one rule for a token
+whose text cannot be read; ``FD``, the pattern for a redirect's
 file descriptor; ``lift_heredocs`` and ``restore_heredocs``, which take a
 quoted ``$(cat <<'EOF' ... EOF)`` body out of a command and put it back; and
 ``command_words``, each simple command seen through ``( )``, ``$( )`` and
@@ -101,6 +102,33 @@ CLOSING_KEYWORD = re.compile(
 )
 # A shell expansion: the text it stands in cannot be read from the command.
 EXPANSION = re.compile(r"`|\$[A-Za-z0-9_{(@*#?!$-]")
+
+
+def unreadable(tok: str) -> str | None:
+    """The expansion *tok* holds, else a bare ``$`` or backtick, else None.
+
+    The one rule for text a guard cannot read, which both the tea and the
+    commit guard point to.
+
+    A token holding a ``$`` or a backtick is unreadable even where the
+    shell would leave it literal (``'costs $5'``, ANSI-C ``$'...'``),
+    because the tokenizer drops the quoting. The way to write such text is
+    a quoted heredoc: call this function on the token before
+    ``restore_heredocs``, so a quoted heredoc's body is never checked.
+
+    Scope is deliberate and differs by guard: which tokens a guard passes
+    is its own choice. The tea guard passes every argument of a write it
+    guards, because it reads every argument as text it may post. The commit
+    guard passes only its message values, because git records no other
+    argument in the message and a variable one (``git merge "$branch"``)
+    must pass. A variable argument can therefore still supply ``-m``
+    itself. That is the commit guard's accepted limit.
+    """
+    if found := EXPANSION.search(tok):
+        return found.group(0)
+    return next((c for c in "$`" if c in tok), None)
+
+
 # A number glued to a redirect operator is a descriptor (`2>&1`), not an
 # index; `tea issues 2 > out` keeps its `2`.
 FD = re.compile(r"(?<![\w.$#-])\d+(?=[<>])")
