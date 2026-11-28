@@ -387,18 +387,19 @@ def pid_alive(pid):
     return True
 
 
-def watch(stream_path, expected_model, pid):
+def watch(stream_path, expected_model, pid, wrapper):
     """TERM pid; exit 3 at a bad first init, 4 at a bad step, event or line.
 
     Otherwise return once pid is gone. Lines end at a newline only. The
     watch also ends when the wrapper is gone: a signalled wrapper exits
     without reaping agy, and a pid nobody reaps would look alive forever.
+    The wrapper passes its pid: a watcher that starts after a signalled
+    wrapper has exited would take its new parent for the wrapper.
     """
     pos = 0
     buf = b""
     seen = False
-    parent = os.getppid()
-    while os.getppid() == parent and pid_alive(pid):
+    while os.getppid() == wrapper and pid_alive(pid):
         try:
             with open(stream_path, "rb") as fh:
                 fh.seek(pos)
@@ -520,8 +521,8 @@ def verify(stream_path, expected_model, msg_path):
 
 
 cmd = sys.argv[1:2]
-if cmd == ["watch"] and len(sys.argv) == 5:
-    watch(sys.argv[2], sys.argv[3], int(sys.argv[4]))
+if cmd == ["watch"] and len(sys.argv) == 6:
+    watch(sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5]))
 elif cmd == ["verify"] and len(sys.argv) == 5:
     verify(*sys.argv[2:5])
 else:
@@ -560,7 +561,7 @@ AGY_PID=$!
 # early stop for the rest of the run: the verification below still decides
 # the outcome. It is never signalled: it ends within a poll of agy, or of
 # this wrapper.
-python3 -I -c "$CHECK_SRC" watch "$STREAM_FILE" "$MODEL" "$AGY_PID" \
+python3 -I -c "$CHECK_SRC" watch "$STREAM_FILE" "$MODEL" "$AGY_PID" "$$" \
 	> /dev/null 2>&1 &
 WATCH_PID=$!
 wait "$AGY_PID" || STATUS=$?

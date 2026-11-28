@@ -8,6 +8,7 @@ attributable. No real ``agy``, no network, nothing written outside
 ``tmp_path``: PATH is a farm of the few tools the wrapper needs.
 """
 
+import contextlib
 import json
 import os
 import shutil
@@ -55,7 +56,8 @@ _REGISTRY = ["ask_permission", "run_command", "write_to_file", "search_web"]
 
 # `linger` holds a sleep length: the fake then stays up that long and stops on
 # TERM, taking its sleep with it; its trap and `started` come before stdout,
-# so a TERM that answers stdout finds both. `split` writes stdout in two
+# so a TERM that answers stdout finds both. With `deaf` as well it ignores
+# TERM instead, and writes its pid to `pid`. `split` writes stdout in two
 # halves. `gap` writes the first stdout line, waits the length it holds, then
 # writes the rest.
 _FAKE_AGY = """#!@BASH@
@@ -68,6 +70,7 @@ cat > "$d/stdin"
 [ -f "$d/stderr" ] && cat "$d/stderr" >&2
 if [ -f "$d/linger" ]; then
     trap 'kill $! 2> /dev/null; exit 143' TERM
+    [ -f "$d/deaf" ] && trap '' TERM && echo $$ > "$d/pid"
     : > "$d/started"
 fi
 if [ -f "$d/split" ]; then
@@ -1426,3 +1429,39 @@ def test_sigterm_leaves_no_watcher(bridge: Bridge, bounded: bool) -> None:
     proc.communicate(timeout=30)
     assert proc.returncode == 128 + signal.SIGTERM
     assert _wait_until_none_names(bridge.tmp_dir) == []
+
+
+@needs_proc
+@pytest.mark.parametrize("bounded", [True, False])
+def test_watcher_started_after_the_wrapper_exited_ends(
+    bridge: Bridge, bounded: bool
+) -> None:
+    # The watcher starts only once a TERMed wrapper is gone, and agy outlives
+    # the TERM: its new parent must not pass for the wrapper.
+    _set_bounded(bridge, bounded)
+    (bridge.fake / "stdout").write_text(
+        _stream(include_result=False), encoding="utf-8"
+    )
+    (bridge.fake / "linger").write_text("6\n", encoding="utf-8")
+    (bridge.fake / "deaf").touch()
+    shim = bridge.bin_dir / "python3"
+    shim.unlink()
+    shim.write_text(
+        "#!/bin/sh\n"
+        'for arg in "$@"; do [ "$arg" = watch ] && '
+        'while kill -0 "$PPID" 2> /dev/null; do sleep 0.05; done; done\n'
+        f'exec "{sys.executable}" "$@"\n',
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    proc = _spawn(bridge)
+    _wait_started(bridge, proc)
+    try:
+        proc.terminate()
+        proc.communicate(timeout=30)
+        assert proc.returncode == 128 + signal.SIGTERM
+        assert _wait_until_none_names(bridge.tmp_dir) == []
+    finally:
+        pid = int((bridge.fake / "pid").read_text(encoding="utf-8"))
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(pid, signal.SIGKILL)
