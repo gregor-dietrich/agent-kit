@@ -20,6 +20,11 @@
             "type": "command",
             "command": "./hooks/tea-guard.sh",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "./hooks/commit-guard.sh",
+            "timeout": 5
           }
         ]
       },

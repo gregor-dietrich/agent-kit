@@ -29,6 +29,11 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/tea-guard.sh\"",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/commit-guard.sh\"",
+            "timeout": 5
           }
         ]
       },

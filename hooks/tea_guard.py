@@ -26,8 +26,8 @@ to disagree with the shell. Not seen: a ``tea`` call inside an inner shell
 tea ...``); a command word built from a variable; brace expansion; a
 quoted redirect operator passed as an argument of its own; a command that
 does not tokenize at all; and text piped into a comment that also has a
-body argument. ``tea issues create|edit`` and commit messages are outside
-both rules.
+body argument. ``tea issues create|edit`` is outside both rules; commit
+messages are the commit guard's (commit_guard.py).
 
 Behavior is pinned by tests/hooks/test_tea_guard.py — a crashed PreToolUse
 hook fails OPEN in the harness, so those tests are what notices a broken

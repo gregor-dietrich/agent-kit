@@ -16,7 +16,7 @@ full context cost, none of the earned specificity, and — worst — rules
 whose premises were never tested there.
 
 So the kit is deliberately small, and almost none of it is always on:
-one short SessionStart note, three guard hooks, a session temp-dir pruner,
+one short SessionStart note, four guard hooks, a session temp-dir pruner,
 and skills that load when their task comes up. It carries the _method_
 (mechanize the convention; state what would falsify the decision; give
 every finding a terminal destination) and leaves the _instances_ to
@@ -31,6 +31,7 @@ setup that grows the way the original did.**
 | --------- | ---------- | ----------- |
 | `hooks/pipe_status_guard.py` | Denies reading a gate's exit status through a pipe (`make test \| tail`) | Any repository, either shell; gate list covers make, pytest, Maven, Gradle, npm/pnpm, cargo, go and more |
 | `hooks/tea_guard.py` | Denies a `tea` single issue/PR read without `--comments`, and a `tea` comment or PR write that carries a closing or reopen keyword before `#N` or text it cannot read (admits `Closes #N` lines in a PR description) | Gitea/`tea` only; silent everywhere else |
+| `hooks/commit_guard.py` | Denies a `git commit` or `git merge` whose message carries a closing or reopen keyword before `#N`, or whose message it cannot read | Any repository; silent on commands that are not a commit or merge |
 | `hooks/decisions_status_guard.py` | An agent may draft and amend decisions-log entries but not ratify, de-ratify or delete them | Repositories with a `docs/decisions.md` in the format below; a no-op elsewhere |
 | `hooks/prune_session_tmp.py` | At Claude Code and Codex session start (`hooks/hooks.json`; not registered in Antigravity's root `hooks.json`), in a detached background child, removes Claude Code session temp dirs under `claude-<uid>` untouched for 4 days, never the current or a running session. Tracks Claude Code internals as of 2.1.310 and stops pruning silently if they move | Linux; macOS unverified (#73); inert below Python 3.10 |
 | `hooks/hook_lib.py` | Shared plumbing: payload parse, deny envelope, shell tokenizer, Claude, Codex and Antigravity path resolution | Internal |
@@ -57,6 +58,19 @@ over it twice. It is a fluent shell habit, and only a check at the moment
 of the call reaches it. It is also shell-aware: bash spells the array
 `${PIPESTATUS[0]}` and zsh `${pipestatus[1]}`, each is silently empty in
 the other shell, and the guard reads `$SHELL` to name the right one.
+
+### What the commit guard reads
+
+The commit guard reads `git commit` and `git merge` messages given with
+`-m`/`--message`, literally or as a quoted `$(cat <<'EOF' ... EOF)`
+heredoc, and for `commit` its `--trailer` values, and denies one carrying
+a closing or reopen keyword before `#N`. It denies as unreadable a
+message holding a shell expansion, one taken from `-F`/`--file` (stdin
+included) and one left to the editor. It does not read messages git
+carries or prepares (`--amend --no-edit`, `-C`, `--fixup`, merge's own
+message, `revert`, `cherry-pick`, `rebase`), commands the tea guard's
+shell reading does not see, commits made outside the agent's shell tool,
+or the squash and merge messages the forge composes.
 
 ### The decisions-log format the guard reads
 

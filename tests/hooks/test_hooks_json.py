@@ -74,6 +74,7 @@ def test_the_guards_are_wired_to_the_tools_they_guard() -> None:
         ("SessionStart", "", "prune-session-tmp.sh"),
         ("PreToolUse", "Bash", "pipe-status-guard.sh"),
         ("PreToolUse", "Bash", "tea-guard.sh"),
+        ("PreToolUse", "Bash", "commit-guard.sh"),
         ("PreToolUse", "Write|Edit|apply_patch", "decisions-status-guard.sh"),
     }
 
@@ -94,6 +95,7 @@ def _probe(matcher: str, script: str, root: Path) -> dict[str, Any]:
     command = {
         "pipe-status-guard.sh": "make test | tail -5",
         "tea-guard.sh": "tea issues 1",
+        "commit-guard.sh": "git commit -m 'Fixes #1'",
     }[script]
     return {
         "cwd": str(root),
@@ -584,6 +586,7 @@ def test_antigravity_guards_are_wired_to_the_tools_they_guard() -> None:
         ("SessionStart", "", "session-context.sh"),
         ("PreToolUse", "run_command", "pipe-status-guard.sh"),
         ("PreToolUse", "run_command", "tea-guard.sh"),
+        ("PreToolUse", "run_command", "commit-guard.sh"),
         (
             "PreToolUse",
             (
@@ -620,6 +623,7 @@ def _agy_probe(script: str, root: Path) -> dict[str, Any]:
     command = {
         "pipe-status-guard.sh": "make test | tail -5",
         "tea-guard.sh": "tea issues 1",
+        "commit-guard.sh": "git commit -m 'Fixes #1'",
     }[script]
     return {
         "hookEventName": "PreToolUse",

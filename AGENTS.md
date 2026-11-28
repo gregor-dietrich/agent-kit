@@ -28,7 +28,7 @@ that can break silently.
   A PreToolUse hook that crashes fails open — the tool call proceeds —
   so a broken guard is silent, and the tests are what notices. Test what
   a guard denies _and_ what it deliberately lets through.
-- Hooks are stdlib-only Python behind a bash wrapper, which for the two
+- Hooks are stdlib-only Python behind a bash wrapper, which for the
   Bash guards is also a prefilter, and fail open on any payload they
   cannot parse. Never block a call you cannot read.
   They run under the user's `python3`, not the 3.13 test venv, so hook
