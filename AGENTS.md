@@ -136,8 +136,9 @@ that can break silently.
   proves nothing.
 - `agy plugin validate .` — after any manifest, hook, skill or agent
   change. Must pass with zero errors. Expected multi-tool warnings: root
-  `AGENTS.md` and `hooks/hooks.json` (both are intentionally for other
-  tools; Antigravity reads root `hooks.json` and `skills/`/`agents/`).
+  `AGENTS.md`, `GEMINI.md` and `hooks/hooks.json` (all intentionally for
+  other tools; Antigravity reads root `hooks.json` and
+  `skills/`/`agents/`).
 
 ## Releasing
 
