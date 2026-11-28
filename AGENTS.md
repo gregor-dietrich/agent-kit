@@ -18,7 +18,7 @@ that can break silently.
 | `agents/` | Antigravity-native role definitions (`model:` tiers, YAML `tools:` lists — `code-reviewer`, `software-architect` and `scout` omit write tools and hold sandboxed `run_command`) plus Codex (`codex-model`, `codex-effort`, `codex-sandbox`) and Antigravity bridge (`agy-model`) pins |
 | `claude-agents/` | Claude Code role definitions (`model:`, comma `tools:`), bodies kept byte-for-byte identical to `agents/` and pinned by `tests/test_role_pins.py`; the manifest's `agents` list replaces Claude Code's default `agents/` scan, so the Antigravity files never load there (#94) |
 | `scripts/` | `agy-agent.sh` and `codex-agent.sh`, the opt-in cross-family bridges ai-review Stage 1c fires |
-| `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here |
+| `tests/` | pytest suite; every hook, and every script a skill fires, is pinned here, as is the release snippet in `README.md`, "Releasing" |
 | `allowed_signers` | The release key's public half: the tagging snippet in `README.md`, "Releasing", pushes only a tag signed by the key this file names |
 | `devkitw`, `devkit.toml` | devkit's wrapper, copied verbatim from the pinned tag and never edited, and its pin |
 
