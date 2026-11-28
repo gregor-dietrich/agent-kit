@@ -279,12 +279,15 @@ from the manifests and is signed with a dedicated SSH release key
    (`SHA256:dYsHxqttXNQpFhcKpXte7CSrVi2uHdexcEBomV0SHCE`) at
    `~/.ssh/id_agent_kit`, or at the path `AGENT_KIT_RELEASE_KEY` names;
    no ssh-agent is needed. It switches to `main`, fast-forwards it to
-   the remote's, refuses when the two still differ or the tree is not
-   clean, and signs with that file only when its public key is the one
-   `allowed_signers` names, so a tag can only be signed by the pinned
-   key. It pushes the tag, deleting the local one when that push fails,
-   and fast-forwards the protected `release` branch to the tagged
-   commit:
+   the remote's, refuses when the two still differ, the tree is not
+   clean or the tag exists, and signs with that file only when its
+   public key is the one `allowed_signers` names. It then verifies the
+   new tag against `allowed_signers` and deletes it when another key
+   signed it, so only a tag the pinned key signed is pushed: git signs
+   with the key a `.pub` file beside the key file names, and lets an
+   ssh-agent that holds that key sign. It pushes the tag, deleting the
+   local one when that push fails, and fast-forwards the protected
+   `release` branch to the tagged commit:
 
    ```sh
    git switch -q main && git pull -q --ff-only origin main &&
@@ -292,15 +295,17 @@ from the manifests and is signed with a dedicated SSH release key
        { echo "main differs from origin's main" >&2; false; }; } &&
      { [ -z "$(git status --porcelain --untracked-files=all --ignore-submodules=none)" ] ||
        { echo "working tree is not clean" >&2; false; }; } &&
+   tag=v$(python3 -c 'import json, sys; vs = {json.load(open(p))["version"].strip() for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".antigravity-plugin/plugin.json")}; len(vs) == 1 or sys.exit(f"manifest versions differ: {vs}"); v = next(iter(vs)); print(v or sys.exit("plugin.json declares no version"))') &&
+     { ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null ||
+       { echo "tag $tag already exists: main's manifests declare ${tag#v}; a new release needs its pull request merged first" >&2; false; }; } &&
    key=$(sed -n 's/^agent-kit-release namespaces="git" \(.*\)$/\1/p' allowed_signers) &&
      : "${key:?allowed_signers carries no agent-kit-release line}" &&
    file=${AGENT_KIT_RELEASE_KEY:-$HOME/.ssh/id_agent_kit} &&
      { [ "$(ssh-keygen -y -f "$file" | cut -d' ' -f1,2)" = "$key" ] ||
        { echo "$file is not the release key allowed_signers names" >&2; false; }; } &&
-   tag=v$(python3 -c 'import json, sys; vs = {json.load(open(p))["version"].strip() for p in (".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".antigravity-plugin/plugin.json")}; len(vs) == 1 or sys.exit(f"manifest versions differ: {vs}"); v = next(iter(vs)); print(v or sys.exit("plugin.json declares no version"))') &&
-     { ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null ||
-       { echo "tag $tag already exists: main's manifests declare ${tag#v}; a new release needs its pull request merged first" >&2; false; }; } &&
      git -c gpg.format=ssh -c user.signingKey="$file" tag -a -s "$tag" -m "agent-kit $tag" &&
+     { git -c gpg.ssh.allowedSignersFile=allowed_signers verify-tag "$tag" ||
+       { git tag -d "$tag" >/dev/null; echo "$tag is not signed by the release key allowed_signers names; deleted local $tag" >&2; false; }; } &&
      { git push origin "$tag" ||
        { git tag -d "$tag" >/dev/null; echo "tag push failed; deleted local $tag" >&2; false; }; } &&
      git push origin "${tag}^{commit}:refs/heads/release"
