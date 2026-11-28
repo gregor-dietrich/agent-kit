@@ -394,7 +394,7 @@ def command_words(cmd: str) -> list[tuple[str, list[str]]]:
     out: list[tuple[str, list[str]]] = []
     for first, tail in simple_commands(cmd, multiline=True):
         seg: list[str] = []
-        for tok in [first, *_without_redirects(tail), ")"]:
+        for tok in [*_without_redirects([first, *tail]), ")"]:
             if tok not in {"(", ")"}:
                 seg.append(tok)
                 continue

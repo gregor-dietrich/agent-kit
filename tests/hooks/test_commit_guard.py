@@ -63,6 +63,9 @@ _EDITOR = "takes its message from an editor"
         'if true; then git commit -m "fixes #3"; fi',
         "{ git commit -m 'fixes #3'; }",
         "! git commit -m 'fixes #3'",
+        # a redirect in front of the command word
+        "2>&1 git commit -m 'fixes #3'",
+        ">/dev/null git commit -m 'fixes #3'",
         "x=$(git commit -m 'fixes #3')",
         # a trailer is recorded as `token: value`
         "git commit -m ok --trailer 'Closes=#3'",

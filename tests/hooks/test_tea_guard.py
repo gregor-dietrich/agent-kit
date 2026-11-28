@@ -160,6 +160,8 @@ _NO_BODY = "no body argument"
         '{ tea comment 5 "fixes #3"; }',
         '! tea comment 5 "fixes #3"',
         'if true; then tea comment 5 "fixes #3"; fi',
+        '2>&1 tea comment 5 "fixes #3"',
+        '>/dev/null tea comment 5 "fixes #3"',
         'for i in 1; do tea comment 5 "fixes #3"; done',
         'cd x;# don\'t\ntea comment 5 "a\nfixes #3"',
     ],
